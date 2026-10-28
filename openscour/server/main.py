@@ -108,7 +108,7 @@ async def search(req: SearchRequest, request: Request) -> SearchResponse:
         text = page if isinstance(page, str) else r.snippet
         if not text:
             continue
-        docs.append(Doc(url=r.url, title=r.title, text=text, rank=i))
+        docs.append(Doc(url=r.url, title=r.title, text=text, rank=i, published=r.published_date))
         meta[r.url] = (r, page if isinstance(page, str) else None)
 
     ranked = rank(req.query, docs, chunks_per_doc)[: req.max_results]

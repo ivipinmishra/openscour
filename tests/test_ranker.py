@@ -1,6 +1,48 @@
 from openscour.server.fetcher import strip_back_matter
 from openscour.server.providers import RawResult, filter_results
-from openscour.server.ranker import Doc, answer_pattern, chunk_text, query_terms, rank
+from openscour.server.ranker import (
+    _THIS_YEAR,
+    Doc,
+    answer_pattern,
+    chunk_text,
+    entity_terms,
+    query_terms,
+    rank,
+    recency_multiplier,
+)
+
+
+def test_topic_search_requires_named_topic():
+    # A changelog that repeats "AWS" and "updates" but never mentions Bedrock
+    # used to outrank Bedrock-specific pages.
+    changelog = (
+        "AWS What's New. Latest AWS updates. Amazon Corretto gets October patch updates. "
+        "AWS releases updates for AWS Lambda. More AWS updates for AWS customers."
+    )
+    bedrock = "Amazon Bedrock now supports a new model from AWS, the latest of several Bedrock updates."
+    docs = [
+        Doc(url="https://changelog.example", title="Latest AWS Releases, Changelog & Updates", text=changelog, rank=0),
+        Doc(url="https://aws.example/bedrock", title="What's new in Amazon Bedrock", text=bedrock, rank=1),
+    ]
+    assert rank("Latest AWS Bedrock updates", docs, chunks_per_doc=1)[0].doc.url == "https://aws.example/bedrock"
+
+
+def test_latest_prefers_recent_pages():
+    old = f"Python release notes. Python 3.9 was released in {_THIS_YEAR - 6} with new features."
+    new = f"Python release notes. Python 3.15 was released in October {_THIS_YEAR} with new features."
+    docs = [
+        Doc(url="https://old.example", title="Python release", text=old, rank=0),
+        Doc(url="https://new.example", title="Python release", text=new, rank=1),
+    ]
+    assert rank("latest Python release", docs, chunks_per_doc=1)[0].doc.url == "https://new.example"
+
+
+def test_recency_and_entities():
+    assert recency_multiplier(f"updated {_THIS_YEAR}") > recency_multiplier(f"updated {_THIS_YEAR - 5}")
+    # Years after this one are roadmaps, not news.
+    assert recency_multiplier(f"goals for {_THIS_YEAR + 4}") == 1.0
+    assert entity_terms("Latest AWS Bedrock updates") == {"aws", "bedrock"}
+    assert entity_terms("latest aws bedrock updates") == set()
 
 
 def test_who_question_ignores_names_from_the_question():

@@ -4,6 +4,7 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import date
 
 _WORD = re.compile(r"[a-z0-9]+(?:'[a-z]+)?")
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
@@ -214,12 +215,60 @@ class BM25:
         return s
 
 
+# Words that ask for recency rather than name the topic.
+FRESHNESS_WORDS = frozenset("latest newest recent recently new current news update updates today".split())
+_YEAR = re.compile(r"\b(?:19[5-9]\d|20\d{2})\b")
+_THIS_YEAR = date.today().year
+
+
+def wants_fresh(query: str) -> bool:
+    return bool(set(_WORD.findall(query.lower())) & FRESHNESS_WORDS)
+
+
+def entity_terms(query: str) -> set[str]:
+    """Capitalised words after the first, e.g. "AWS" and "Bedrock" in "Latest AWS Bedrock updates"."""
+    words = re.findall(r"[A-Za-z0-9][\w.+-]*", query)[1:]
+    return {
+        t
+        for w in words
+        if w[0].isupper()
+        for t in tokenize(w)
+        if t not in FRESHNESS_WORDS
+    }
+
+
+def recency_multiplier(text: str, published: str | None = None) -> float:
+    """Favour text dated this year; years after this one are plans, not news."""
+    years = [int(y) for y in _YEAR.findall(f"{text} {published or ''}") if int(y) <= _THIS_YEAR]
+    if not years:
+        return 1.0
+    newest = max(years)
+    if newest == _THIS_YEAR:
+        return 1.3
+    if newest == _THIS_YEAR - 1:
+        return 1.1
+    return 0.8
+
+
+def topic_multiplier(chunk_terms: set[str], topic: set[str], entities: set[str]) -> float:
+    """Demote passages that miss part of the topic.
+
+    BM25 saturates, so a passage repeating "AWS" and "updates" can outscore one
+    about Bedrock; named things in the query ("Bedrock") must actually appear.
+    """
+    m = 1.0
+    if topic:
+        m *= 0.5 + 0.5 * len(topic & chunk_terms) / len(topic)
+    return m * 0.6 ** len(entities - chunk_terms)
+
+
 @dataclass
 class Doc:
     url: str
     title: str
     text: str
     rank: int  # position in the search engine's result list
+    published: str | None = None
     chunks: list[str] = field(default_factory=list)
 
 
@@ -235,6 +284,12 @@ def rank(query: str, docs: list[Doc], chunks_per_doc: int) -> list[Ranked]:
         return []
     answer = answer_pattern(query)
     present = bool(PRESENT_TENSE.search(query))
+    # Factual questions have their own answer-shaped scoring; topic searches
+    # ("Latest AWS Bedrock updates") get topic coverage and freshness instead.
+    topic_search = answer is None
+    fresh = topic_search and wants_fresh(query)
+    topic = set(tokenize(query)) - FRESHNESS_WORDS
+    entities = entity_terms(query)
 
     index: list[tuple[int, int]] = []  # (doc idx, chunk idx)
     corpus: list[list[str]] = []
@@ -257,7 +312,12 @@ def rank(query: str, docs: list[Doc], chunks_per_doc: int) -> list[Ranked]:
     for i, (di, ci) in enumerate(index):
         s = bm25.score(q, i)
         if s:
-            s *= chunk_multiplier(docs[di].chunks[ci], ci, qset, titles[di], answer, present)
+            chunk = docs[di].chunks[ci]
+            s *= chunk_multiplier(chunk, ci, qset, titles[di], answer, present)
+            if topic_search:
+                s *= topic_multiplier(set(corpus[i]), topic, entities)
+            if fresh:
+                s *= recency_multiplier(chunk)
         per_doc.setdefault(di, []).append((s, ci))
 
     raw: list[tuple[float, int, list[int]]] = []
@@ -269,7 +329,10 @@ def rank(query: str, docs: list[Doc], chunks_per_doc: int) -> list[Ranked]:
         coverage = len(qset & doc_terms[di]) / len(qset) if qset else 0.0
         # The search engine's own ordering is a useful prior.
         prior = 1.0 / (1 + 0.15 * docs[di].rank)
-        raw.append((best * (0.5 + 0.5 * coverage) * (0.7 + 0.3 * prior), di, sorted(ci for _, ci in top)))
+        score = best * (0.5 + 0.5 * coverage) * (0.7 + 0.3 * prior)
+        if fresh:
+            score *= recency_multiplier(docs[di].title, docs[di].published) ** 0.5
+        raw.append((score, di, sorted(ci for _, ci in top)))
 
     top_score = max(s for s, _, _ in raw) or 1.0
     out = [
