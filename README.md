@@ -1,56 +1,227 @@
 # OpenScour
 
-A self-hosted web search API for your apps and AI agents. It needs no paid search provider.
+**Self-hosted web search for LLMs and AI agents. Answer-first passages, no paid search API.**
 
-It returns ranked passages from real pages, not just links. For factual questions ("When is…", "Who is…", "How tall…") the ranker favors passages that actually contain the answer and starts each passage at the answering sentence.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![Docker](https://img.shields.io/badge/docker-compose-2496ED.svg)](docker-compose.yml)
+
+OpenScour searches the web, reads the result pages and returns the passages that actually answer your query, ready to drop into an LLM prompt. You run it on your own machine or cloud account, and it needs no API key from any search provider.
+
+```python
+from openscour import OpenScour
+
+client = OpenScour()
+response = client.search("Who is vice president in the USA?")
+
+print(response.results[0].content)
+# JD Vance is the 50th and current vice president since January 20, 2025.
+```
+
+## Features
+
+- **Answer-first passages.** Results are ranked passages from real pages, not just links. For questions like *when*, *who* and *how many*, the passage that contains the answer comes first and starts at the answering sentence.
+- **Topic-aware and fresh.** Searches such as *"Latest AWS Bedrock updates"* require the named topic in each passage and favor recent content.
+- **No paid search provider.** Results come from a self-hosted [SearXNG](https://github.com/searxng/searxng) meta-search engine, with a DuckDuckGo fallback.
+- **Clean text extraction.** Navigation, cookie banners, reference lists and footnote markers are removed. The `/extract` endpoint returns the clean text of any URL.
+- **Typed Python client.** `OpenScour` and `AsyncOpenScour` return typed results and raise typed errors. The client only depends on `httpx`.
+- **Plain HTTP API.** Any language can call `POST /search` and `POST /extract`.
+- **Optional AI answers.** Claude can write a short cited answer from the top passages, through Amazon Bedrock or the Claude API.
+- **Runs anywhere Docker runs**, from a laptop to AWS.
+
+## Quickstart
+
+Requirements: [Docker](https://docs.docker.com/get-docker/) and Python 3.11 or newer.
+
+**1. Start the server**
+
+```bash
+git clone https://github.com/ivipinmishra/openscour.git
+```
+
+```bash
+cd openscour
+```
+
+```bash
+docker compose up -d --build
+```
+
+This starts SearXNG and the OpenScour API on http://localhost:8000. Check it with `curl http://localhost:8000/health`, or open the interactive API docs at http://localhost:8000/docs.
+
+**2. Install the client in your project**
+
+OpenScour is not on PyPI yet, so install it from GitHub. With [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv add git+https://github.com/ivipinmishra/openscour
+```
+
+Or with pip, inside a virtual environment:
+
+```bash
+pip install git+https://github.com/ivipinmishra/openscour
+```
+
+**3. Search**
+
+```python
+from openscour import OpenScour
+
+client = OpenScour()  # http://localhost:8000 by default
+
+response = client.search("Latest AWS Bedrock updates", max_results=5)
+for result in response.results:
+    print(f"{result.score:.2f}  {result.title}")
+    print(f"      {result.url}")
+    print(f"      {result.content[:200]}")
+```
+
+## How it works
 
 ```
-query ─► SearXNG (meta-search) ─► fetch pages ─► extract clean text ─► BM25 rank chunks ─► results
-                 └─ DuckDuckGo fallback                                   └─ optional Claude answer
+                ┌────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────────┐
+query ────────► │  SearXNG   │──►│  Fetch pages │──►│ Extract text │──►│  Rank passages   │──► results
+                │ meta-search│   │  in parallel │   │ (trafilatura)│   │ BM25 + signals   │
+                └─────┬──────┘   └──────────────┘   └──────────────┘   └────────┬─────────┘
+                      │ no results                                              │ optional
+                      ▼                                                         ▼
+                 DuckDuckGo                                              Claude answer
 ```
+
+1. **Search.** SearXNG queries several public search engines and merges their results. If it returns nothing, OpenScour falls back to DuckDuckGo.
+2. **Fetch.** The top pages are downloaded in parallel, with timeouts and size limits.
+3. **Extract.** [trafilatura](https://github.com/adbar/trafilatura) pulls out the main text. OpenScour then removes reference sections, footnote markers and other page clutter.
+4. **Rank.** Each page is split into passages and scored with BM25, adjusted by:
+   - **answer shape:** dates for *when*, numbers for *how many* or *how tall*, names for *who*, with a boost for *current* holders on *who is* questions
+   - **topic coverage:** passages must mention the query's named terms
+   - **freshness:** *latest*, *new* and *recent* queries prefer this year's content
+   - **page quality:** passages near the top of a page rank higher, and boilerplate ranks lower
+5. **Answer (optional).** Claude reads the top passages and writes a short answer with citations.
+
+Searches and pages are cached in memory for 15 minutes.
 
 ## Python client
 
 ```python
 from openscour import OpenScour
 
-client = OpenScour(api_key="YOUR_API_KEY", base_url="http://localhost:8000")
+client = OpenScour(
+    api_key="YOUR_API_KEY",              # or OPENSCOUR_API_KEY
+    base_url="https://search.example.com",  # or OPENSCOUR_BASE_URL; default http://localhost:8000
+)
 
 response = client.search(
-    query="Latest AWS Bedrock updates",
+    "AWS re:Invent announcements",
+    search_depth="advanced",        # "basic" (default) or "advanced"
+    topic="news",                   # "general" (default) or "news"
     max_results=10,
+    time_range="week",              # "day", "week", "month" or "year"
+    include_domains=["aws.amazon.com"],
+    include_raw_content=True,       # full page text in result.raw_content
 )
-for result in response.results:
-    print(result.score, result.title, result.url)
-    print(result.content)
 
 pages = client.extract(["https://en.wikipedia.org/wiki/Web_search_engine"])
 print(pages.results[0].raw_content)
+print(pages.failed_results)         # URLs that could not be fetched, with the reason
 ```
 
-`api_key` and `base_url` fall back to the `OPENSCOUR_API_KEY` and `OPENSCOUR_BASE_URL` environment variables (default URL `http://localhost:8000`). `search()` takes every `/search` option below as a keyword argument.
-
-For async code use `AsyncOpenScour`, which has the same methods:
+For async code, `AsyncOpenScour` has the same methods:
 
 ```python
 from openscour import AsyncOpenScour
 
 async with AsyncOpenScour() as client:
-    response = await client.search("Who is vice president in the USA?")
+    response = await client.search("When is the midterm election in the USA?")
 ```
 
-Errors are typed: `AuthenticationError` (bad key), `NoResultsError` (no search backend answered), `APIConnectionError` (server unreachable), all subclasses of `OpenScourError`.
+Errors are typed and all inherit from `OpenScourError`:
 
-## Install
-
-| You want | Install |
+| Error | When |
 |---|---|
-| The client, to call a running OpenScour server | `pip install openscour` (only needs `httpx`) |
-| To run the server | `pip install "openscour[server]"`, or use Docker |
+| `AuthenticationError` | The API key is missing or wrong |
+| `InvalidRequestError` | The request was rejected, for example an empty query |
+| `NoResultsError` | No search backend returned results |
+| `APIConnectionError` | The server could not be reached |
 
-## Run the server locally
+## HTTP API
 
-Requirements: Docker and [uv](https://docs.astral.sh/uv/).
+Send `Authorization: Bearer <key>` when the server has `API_KEYS` set.
+
+### `POST /search`
+
+```bash
+curl -X POST http://localhost:8000/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Who is vice president in the USA?", "max_results": 3}'
+```
+
+| Field | Default | Description |
+|---|---|---|
+| `query` | required | The search query, up to 400 characters |
+| `search_depth` | `basic` | `basic` fetches `max_results + 3` pages and returns 1 passage per result. `advanced` fetches `2 × max_results` pages and returns 3 passages per result. |
+| `topic` | `general` | `general` or `news` |
+| `max_results` | `5` | 1 to 20 |
+| `time_range` | `null` | `day`, `week`, `month` or `year` |
+| `include_domains` | `[]` | Only return results from these domains |
+| `exclude_domains` | `[]` | Never return results from these domains |
+| `include_raw_content` | `false` | Include the full extracted page text |
+| `include_answer` | `false` | Generate an AI answer (needs `ANSWER_PROVIDER`, see Configuration) |
+
+Response:
+
+```json
+{
+  "query": "Who is vice president in the USA?",
+  "answer": null,
+  "results": [
+    {
+      "title": "Vice President of the United States - Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Vice_President_of_the_United_States",
+      "content": "JD Vance is the 50th and current vice president since January 20, 2025.",
+      "score": 1.0,
+      "raw_content": null,
+      "published_date": null
+    }
+  ],
+  "response_time": 2.94
+}
+```
+
+`score` is relative: the best result in each response scores 1.0.
+
+### `POST /extract`
+
+```bash
+curl -X POST http://localhost:8000/extract \
+  -H "Content-Type: application/json" \
+  -d '{"urls": ["https://en.wikipedia.org/wiki/Web_search_engine"]}'
+```
+
+Takes up to 20 URLs. Returns the clean text of each page in `results` and per-URL errors in `failed_results`.
+
+### `GET /health`
+
+Returns `{"status": "ok"}`.
+
+## Configuration
+
+Set environment variables, or copy [`.env.example`](.env.example) to `.env`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `API_KEYS` | empty (auth off) | Comma-separated keys that clients must send |
+| `SEARXNG_URL` | `http://localhost:8888` | Where the SearXNG instance runs |
+| `DUCKDUCKGO_FALLBACK` | `true` | Use DuckDuckGo when SearXNG returns nothing |
+| `ANSWER_PROVIDER` | `none` | `bedrock` (uses your AWS credentials) or `anthropic` (uses `ANTHROPIC_API_KEY`) |
+| `ANSWER_MODEL` | `claude-opus-5-5` | Model used for AI answers |
+| `AWS_REGION` | `us-east-1` | Region for Amazon Bedrock |
+| `FETCH_TIMEOUT` | `8` | Page fetch timeout in seconds for `advanced` searches |
+| `CACHE_TTL_SECONDS` | `900` | How long searches and pages stay cached |
+
+## Running without Docker
+
+You can run the API directly and keep only SearXNG in Docker:
 
 ```bash
 docker compose up -d searxng
@@ -64,102 +235,73 @@ uv sync
 uv run openscour-server --port 8000
 ```
 
-Try it:
+To install the server into another environment, use the `server` extra: `pip install "openscour[server] @ git+https://github.com/ivipinmishra/openscour"`.
 
-```bash
-uv run python scripts/try_search.py "how does BM25 ranking work"
-```
+## Deploying
 
-```bash
-uv run python scripts/try_search.py "AWS re:Invent announcements" advanced news
-```
+Before you expose OpenScour beyond your own machine:
 
-Interactive API docs: http://localhost:8000/docs
-
-To run the API in Docker as well: `docker compose up -d --build`.
-
-## HTTP API
-
-Any language can call the server directly. Send `Authorization: Bearer <key>` when `API_KEYS` is set.
-
-### `POST /search`
-
-```json
-{
-  "query": "what is retrieval augmented generation",
-  "search_depth": "basic",
-  "topic": "general",
-  "max_results": 5,
-  "include_answer": false,
-  "include_raw_content": false,
-  "include_domains": [],
-  "exclude_domains": [],
-  "time_range": null
-}
-```
-
-| Field | Notes |
-|---|---|
-| `search_depth` | `basic`: fetches `max_results + 3` pages, 1 best passage each, 5s timeout. `advanced`: fetches `2 × max_results` pages, 3 passages each, longer timeout. |
-| `topic` | `general` or `news` |
-| `time_range` | `day`, `week`, `month`, `year` |
-| `include_answer` | Needs `ANSWER_PROVIDER` set (see below), otherwise `answer` is `null` |
-
-Response: `{ query, answer, results: [{ title, url, content, score, raw_content, published_date }], response_time }`
-
-### `POST /extract`
-
-```json
-{ "urls": ["https://en.wikipedia.org/wiki/Web_search_engine"] }
-```
-
-Returns clean page text in `results` and per-URL errors in `failed_results`.
-
-## Configuration (env vars or `.env`)
-
-Copy `.env.example` to `.env` to start.
-
-| Variable | Default | |
-|---|---|---|
-| `API_KEYS` | empty (auth off) | Comma-separated; clients send `Authorization: Bearer <key>` |
-| `SEARXNG_URL` | `http://localhost:8888` | |
-| `DUCKDUCKGO_FALLBACK` | `true` | Used only when SearXNG returns nothing |
-| `ANSWER_PROVIDER` | `none` | `bedrock` (uses your AWS credentials) or `anthropic` (`ANTHROPIC_API_KEY`) |
-| `ANSWER_MODEL` | `claude-opus-5-5` | |
-| `AWS_REGION` | `us-east-1` | For Bedrock |
-| `FETCH_TIMEOUT` | `8` | Seconds, advanced depth |
-| `CACHE_TTL_SECONDS` | `900` | In-memory cache for searches and pages |
+- Change `server.secret_key` in [`searxng/settings.yml`](searxng/settings.yml). The checked-in value is a placeholder for local use.
+- Set `API_KEYS` so only your applications can call the API.
+- Keep SearXNG on a private network. Only the API needs to be reachable.
+- Run more than one API instance only with a shared cache; the built-in cache lives in each process.
 
 ## Known limitations
 
-- **SearXNG scrapes upstream engines.** Some engines (Google, DuckDuckGo) return CAPTCHAs or "access denied", more often from cloud IPs such as AWS. SearXNG uses whichever engines respond. Check the `unresponsive engines` log lines and tune engines in `searxng/settings.yml`.
-- The cache is per process. Move it to Redis (ElastiCache) when you run more than one API task.
-- JavaScript-heavy pages and PDFs are not extracted; the search engine's snippet is used for them instead.
-
-## Before exposing it
-
-- Change `server.secret_key` in `searxng/settings.yml`. The checked-in value is a placeholder for local use.
-- Set `API_KEYS` so only your apps can call the API.
-- Keep SearXNG on a private network; only the API needs to be reachable.
+- **Upstream engines rate-limit.** SearXNG gets results by querying public search engines, and some (Google, DuckDuckGo) answer heavy or automated traffic with CAPTCHAs or blocks. Cloud IP ranges such as AWS are blocked more often. SearXNG uses whichever engines respond; check the `unresponsive engines` lines in the logs and tune engines in `searxng/settings.yml`.
+- **Ranking is rule-based.** It handles common question types well but can miss when the answer is phrased unusually. Turning on AI answers helps with those cases.
+- **JavaScript-heavy pages and PDFs** are not extracted; the search engine's snippet is used instead.
 
 ## Responsible use
 
-SearXNG and the DuckDuckGo fallback get their results by querying public search engines. Automated queries may conflict with those engines' terms of service, and heavy use gets rate-limited or blocked. You are responsible for how you deploy and use this tool. Keep traffic reasonable, respect `robots.txt` and site terms when fetching pages, and consider a licensed search API for commercial-scale use.
+SearXNG and the DuckDuckGo fallback query public search engines. Automated queries may conflict with those engines' terms of service, and heavy use gets rate-limited or blocked. You are responsible for how you deploy and use OpenScour. Keep traffic reasonable, respect site terms when fetching pages, and consider a licensed search API for commercial-scale use.
 
-This project is not affiliated with SearXNG, DuckDuckGo or any search engine.
+OpenScour is not affiliated with SearXNG, DuckDuckGo or any search engine.
 
-## Tests
+## Development
+
+```bash
+uv sync
+```
 
 ```bash
 uv run pytest
 ```
 
-Answer-quality check against the running API (sends 10 real searches):
+Check answer quality against a running server (sends 10 real searches):
 
 ```bash
 uv run python scripts/eval_answers.py
 ```
 
+Try a single query from the command line:
+
+```bash
+uv run python scripts/try_search.py "how does BM25 ranking work"
+```
+
+Project layout:
+
+```
+openscour/
+  client.py          Python client: OpenScour, AsyncOpenScour
+  types.py           Typed results
+  errors.py          Typed errors
+  server/
+    main.py          FastAPI app and the openscour-server command
+    providers.py     SearXNG search with DuckDuckGo fallback
+    fetcher.py       Page fetching and text extraction
+    ranker.py        Passage chunking and ranking
+    answer.py        Optional Claude answers
+searxng/settings.yml SearXNG configuration
+tests/               Unit tests for the client and the ranker
+scripts/             Manual search and answer-quality check
+```
+
+## Contributing
+
+Issues and pull requests are welcome. For ranking changes, include a query that improves and run both `uv run pytest` and `scripts/eval_answers.py`, so improvements for one kind of question don't break another.
+
 ## License
 
-[MIT](LICENSE). SearXNG, which runs as a separate container, is licensed under AGPL-3.0.
+[MIT](LICENSE). SearXNG runs as a separate, unmodified container and is licensed under AGPL-3.0.
