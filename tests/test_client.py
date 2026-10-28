@@ -36,7 +36,7 @@ def make_transport(seen: list[httpx.Request], status: int = 200, body: object = 
     return httpx.MockTransport(handler)
 
 
-def test_search_sends_tavily_style_request_and_parses_results():
+def test_search_sends_request_and_parses_results():
     seen: list[httpx.Request] = []
     client = OpenScour(
         api_key="sk-test",

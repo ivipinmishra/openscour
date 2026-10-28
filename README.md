@@ -1,6 +1,6 @@
 # OpenScour
 
-A self-hosted web search API for your apps and AI agents, in the style of Tavily. It needs no paid search provider.
+A self-hosted web search API for your apps and AI agents. It needs no paid search provider.
 
 It returns ranked passages from real pages, not just links. For factual questions ("When is…", "Who is…", "How tall…") the ranker favors passages that actually contain the answer and starts each passage at the answering sentence.
 
@@ -146,7 +146,7 @@ Copy `.env.example` to `.env` to start.
 
 SearXNG and the DuckDuckGo fallback get their results by querying public search engines. Automated queries may conflict with those engines' terms of service, and heavy use gets rate-limited or blocked. You are responsible for how you deploy and use this tool. Keep traffic reasonable, respect `robots.txt` and site terms when fetching pages, and consider a licensed search API for commercial-scale use.
 
-This project is not affiliated with Tavily, SearXNG, DuckDuckGo or any search engine.
+This project is not affiliated with SearXNG, DuckDuckGo or any search engine.
 
 ## Tests
 
