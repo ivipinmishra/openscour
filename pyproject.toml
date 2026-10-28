@@ -1,0 +1,40 @@
+[project]
+name = "openscour"
+version = "0.1.0"
+description = "Self-hosted web search API for LLMs and agents that returns answer-first passages"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+# The client only needs httpx; the server's dependencies are the "server" extra.
+dependencies = ["httpx>=0.27"]
+
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "trafilatura>=1.12",
+    "ddgs>=9.0",
+    "anthropic[bedrock]>=0.60",
+    "pydantic-settings>=2.4",
+]
+
+[project.scripts]
+openscour-server = "openscour.server.main:run"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["openscour"]
+
+[tool.uv]
+# Developing here means working on both halves.
+default-groups = ["dev"]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "openscour[server]"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

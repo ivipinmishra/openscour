@@ -1,0 +1,22 @@
+services:
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8888/
+    restart: unless-stopped
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - SEARXNG_URL=http://searxng:8080
+      - API_KEYS=${API_KEYS:-}
+      - ANSWER_PROVIDER=${ANSWER_PROVIDER:-none}
+    depends_on:
+      - searxng
+    restart: unless-stopped
