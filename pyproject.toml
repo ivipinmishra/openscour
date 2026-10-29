@@ -18,9 +18,11 @@ server = [
     "anthropic[bedrock]>=0.60",
     "pydantic-settings>=2.4",
 ]
+mcp = ["mcp>=2.3"]
 
 [project.scripts]
 openscour-server = "openscour.server.main:run"
+openscour-mcp = "openscour.mcp_server:main"
 
 [build-system]
 requires = ["hatchling>=1.27"]
@@ -34,7 +36,7 @@ packages = ["openscour"]
 default-groups = ["dev"]
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.24", "openscour[server]"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "openscour[server,mcp]"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

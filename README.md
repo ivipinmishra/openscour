@@ -24,6 +24,7 @@ print(response.results[0].content)
 - **Topic-aware and fresh.** Searches such as *"Latest AWS Bedrock updates"* require the named topic in each passage and favor recent content.
 - **No paid search provider.** Results come from a self-hosted [SearXNG](https://github.com/searxng/searxng) meta-search engine, with a DuckDuckGo fallback.
 - **Clean text extraction.** Navigation, cookie banners, reference lists and footnote markers are removed. The `/extract` endpoint returns the clean text of any URL.
+- **MCP server for AI agents.** Register OpenScour once in Claude Code, Cursor or any MCP client, and the agent can search the web and read pages on its own.
 - **Typed Python client.** `OpenScour` and `AsyncOpenScour` return typed results and raise typed errors. The client only depends on `httpx`.
 - **Plain HTTP API.** Any language can call `POST /search` and `POST /extract`.
 - **Optional AI answers.** Claude can write a short cited answer from the top passages, through Amazon Bedrock or the Claude API.
@@ -76,6 +77,47 @@ for result in response.results:
     print(f"      {result.url}")
     print(f"      {result.content[:200]}")
 ```
+
+## Use with AI agents (MCP)
+
+OpenScour includes an [MCP](https://modelcontextprotocol.io) server, so AI agents can use it as a built-in tool. It gives the agent two tools:
+
+| Tool | What it does |
+|---|---|
+| `search` | Searches the web and returns numbered results with title, URL and the best passage. Takes the same options as the Python client. |
+| `extract` | Returns the clean main text of up to 20 URLs. |
+
+Both tools are read-only. The MCP server talks to your OpenScour server, so start that first (see Quickstart).
+
+**Claude Code**, with [uv](https://docs.astral.sh/uv/) installed:
+
+```bash
+claude mcp add openscour -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour" openscour-mcp
+```
+
+If your OpenScour server isn't on `http://localhost:8000`, or it requires a key, pass them as environment variables:
+
+```bash
+claude mcp add openscour -e OPENSCOUR_BASE_URL=https://search.example.com -e OPENSCOUR_API_KEY=YOUR_API_KEY -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour" openscour-mcp
+```
+
+Then ask Claude something like *"What changed in Amazon Bedrock this month?"* and it will search with OpenScour.
+
+**Other MCP clients** (Cursor, Claude Desktop, VS Code and others) take the same command in their JSON configuration:
+
+```json
+{
+  "mcpServers": {
+    "openscour": {
+      "command": "uvx",
+      "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour", "openscour-mcp"],
+      "env": { "OPENSCOUR_BASE_URL": "http://localhost:8000" }
+    }
+  }
+}
+```
+
+If the OpenScour server is unreachable, the tools return an error that tells the agent so, instead of failing silently.
 
 ## How it works
 
@@ -287,6 +329,7 @@ openscour/
   client.py          Python client: OpenScour, AsyncOpenScour
   types.py           Typed results
   errors.py          Typed errors
+  mcp_server.py      MCP server: search and extract tools for AI agents
   server/
     main.py          FastAPI app and the openscour-server command
     providers.py     SearXNG search with DuckDuckGo fallback
@@ -294,7 +337,7 @@ openscour/
     ranker.py        Passage chunking and ranking
     answer.py        Optional Claude answers
 searxng/settings.yml SearXNG configuration
-tests/               Unit tests for the client and the ranker
+tests/               Unit tests for the client, MCP server and ranker
 scripts/             Manual search and answer-quality check
 ```
 
