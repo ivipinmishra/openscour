@@ -133,18 +133,18 @@ Every field and the response format are in the [API reference](#api-reference).
 
 ### Option 2: Python client
 
-**Install** it in your project. OpenScour is not on PyPI yet, so install it from GitHub. The commands pin release `v0.2.0`; see [Versions and updates](#versions-and-updates) for newer releases.
+**Install** it in your project. OpenScour is not on PyPI yet, so install it from GitHub. The commands pin release `v0.3.0`; see [Versions and updates](#versions-and-updates) for newer releases.
 
 With [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv add git+https://github.com/ivipinmishra/openscour@v0.2.0
+uv add git+https://github.com/ivipinmishra/openscour@v0.3.0
 ```
 
 Or with pip, inside a virtual environment:
 
 ```bash
-pip install git+https://github.com/ivipinmishra/openscour@v0.2.0
+pip install git+https://github.com/ivipinmishra/openscour@v0.3.0
 ```
 
 The client only needs `httpx`; none of the server's dependencies are installed.
@@ -190,13 +190,13 @@ If your OpenScour server isn't at `http://localhost:8000`, or it requires a key,
 #### Claude Code
 
 ```bash
-claude mcp add openscour -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.2.0" openscour-mcp
+claude mcp add openscour -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.3.0" openscour-mcp
 ```
 
 With a different server address or a key:
 
 ```bash
-claude mcp add openscour -e OPENSCOUR_BASE_URL=https://search.example.com -e OPENSCOUR_API_KEY=YOUR_API_KEY -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.2.0" openscour-mcp
+claude mcp add openscour -e OPENSCOUR_BASE_URL=https://search.example.com -e OPENSCOUR_API_KEY=YOUR_API_KEY -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.3.0" openscour-mcp
 ```
 
 Restart Claude Code, then ask something like *"What changed in Amazon Bedrock this month?"*.
@@ -211,7 +211,7 @@ Restart Claude Code, then ask something like *"What changed in Amazon Bedrock th
      "mcpServers": {
        "openscour": {
          "command": "uvx",
-         "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.2.0", "openscour-mcp"],
+         "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.3.0", "openscour-mcp"],
          "env": { "OPENSCOUR_BASE_URL": "http://localhost:8000" },
          "disabled": false,
          "autoApprove": ["search", "extract"]
@@ -242,7 +242,7 @@ Add the same command to the client's MCP configuration:
   "mcpServers": {
     "openscour": {
       "command": "uvx",
-      "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.2.0", "openscour-mcp"],
+      "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.3.0", "openscour-mcp"],
       "env": { "OPENSCOUR_BASE_URL": "http://localhost:8000" }
     }
   }
@@ -253,7 +253,7 @@ The file's location depends on the client; see its documentation for "MCP server
 
 #### Updating and troubleshooting
 
-- **Update to a new release.** Change `v0.2.0` in the configuration to the new version and restart the server in your agent, or restart the agent. See [Versions and updates](#versions-and-updates).
+- **Update to a new release.** Change `v0.3.0` in the configuration to the new version and restart the server in your agent, or restart the agent. See [Versions and updates](#versions-and-updates).
 - **"command not found: uvx".** Desktop apps launched from the Dock may not see your terminal's `PATH`. Use the full path from `which uvx` as `command`, for example `/opt/homebrew/bin/uvx` on Apple Silicon Macs with Homebrew.
 - **"Could not reach OpenScour".** The OpenScour server isn't running or `OPENSCOUR_BASE_URL` is wrong. Start it as in [Step 1](#step-1-start-the-server).
 
@@ -262,7 +262,7 @@ The file's location depends on the client; see its documentation for "MCP server
 The most common use of OpenScour is giving an LLM current information. This example searches with OpenScour, then has Claude answer from the passages it found, citing them. The full script is in [`examples/answer_with_claude.py`](examples/answer_with_claude.py).
 
 ```bash
-uv add git+https://github.com/ivipinmishra/openscour@v0.2.0 anthropic
+uv add git+https://github.com/ivipinmishra/openscour@v0.3.0 anthropic
 ```
 
 ```python
@@ -296,15 +296,15 @@ Because the passages are short and answer-first, the prompt stays small (about 7
 
 ## Versions and updates
 
-OpenScour is released as tagged versions on [GitHub Releases](https://github.com/ivipinmishra/openscour/releases); what changed in each is in the [changelog](CHANGELOG.md). The install commands in this README pin a version (`@v0.2.0`), so your setup only changes when you choose.
+OpenScour is released as tagged versions on [GitHub Releases](https://github.com/ivipinmishra/openscour/releases); what changed in each is in the [changelog](CHANGELOG.md). The install commands in this README pin a version (`@v0.3.0`), so your setup only changes when you choose.
 
 To update:
 
-- **Python client:** change the version in your install command, e.g. `uv add git+https://github.com/ivipinmishra/openscour@v0.2.0`.
+- **Python client:** change the version in your install command, e.g. `uv add git+https://github.com/ivipinmishra/openscour@v0.3.0`.
 - **MCP server:** change the version in your agent's configuration and restart the server in the agent.
-- **Server:** in your clone, run `git fetch --tags`, `git checkout v0.2.0` and `docker compose up -d --build`.
+- **Server:** in your clone, run `git fetch --tags`, `git checkout v0.3.0` and `docker compose up -d --build`.
 
-To always follow the newest code instead, leave out `@v0.2.0`. The MCP server is then cached after its first download; get newer code by stopping it in your agent, running `uv cache clean openscour`, and starting it again.
+To always follow the newest code instead, leave out `@v0.3.0`. The MCP server is then cached after its first download; get newer code by stopping it in your agent, running `uv cache clean openscour`, and starting it again.
 
 ## API reference
 
@@ -370,7 +370,27 @@ Response:
 
 ### `GET /health`
 
-Returns `{"status": "ok"}`.
+Returns `{"status": "ok"}` while the server process is running. Use it as a container liveness check.
+
+### `GET /health/ready`
+
+Whether this instance can serve searches; use it as a load balancer or Kubernetes readiness check. It checks that SearXNG responds:
+
+| Status | Response | Meaning |
+|---|---|---|
+| `200` | `{"status": "ready", "checks": {"searxng": "ok"}}` | Everything works |
+| `200` | `{"status": "degraded", "checks": {"searxng": "error"}}` | SearXNG is down, searches use the DuckDuckGo fallback |
+| `503` | `{"status": "not ready", "checks": {"searxng": "error"}}` | SearXNG is down and the fallback is off |
+
+A degraded instance stays in service on purpose: SearXNG is shared by all instances, so failing them all at once would turn slower searches into an outage.
+
+### Request IDs
+
+Every response has an `X-Request-ID` header. Send your own `X-Request-ID` (up to 128 letters, digits, `.`, `_` or `-`) to trace a request through your logs and OpenScour's; otherwise one is generated. The server logs one line per request with its ID, status, duration, and for searches whether it was cached and how many pages were read:
+
+```
+request_id=3f9c… method=POST path=/search status=200 duration_ms=2140 cache=miss candidates=8 pages_fetched=6 results=5
+```
 
 ### Errors
 
@@ -378,6 +398,7 @@ Returns `{"status": "ok"}`.
 |---|---|
 | `401` | The API key is missing or wrong |
 | `422` | The request is invalid, for example an empty query; the body says which field |
+| `429` | Too many requests; wait the number of seconds in the `Retry-After` header |
 | `502` | No search backend returned results |
 
 ## Python client reference
@@ -389,6 +410,7 @@ client = OpenScour(
     api_key="YOUR_API_KEY",                 # or OPENSCOUR_API_KEY
     base_url="https://search.example.com",  # or OPENSCOUR_BASE_URL; default http://localhost:8000
     timeout=60,                             # seconds
+    max_retries=2,                          # retries for transient failures; 0 turns them off
 )
 
 response = client.search(
@@ -428,13 +450,17 @@ async with AsyncOpenScour() as client:
     response = await client.search("When is the midterm election in the USA?")
 ```
 
+The client retries requests that failed for temporary reasons: connection failures, `429`, `503`, `504`, and `502` from a proxy in front of OpenScour. It waits as long as the server's `Retry-After` header asks, up to 30 seconds, and otherwise backs off exponentially. Searches that time out are not retried, since the server may still be working on them.
+
 Errors are typed and all inherit from `OpenScourError`:
 
 | Error | When |
 |---|---|
 | `AuthenticationError` | The API key is missing or wrong |
 | `InvalidRequestError` | The request was rejected, for example an empty query |
+| `RateLimitError` | Too many requests, after retries; `error.retry_after` says how many seconds to wait |
 | `NoResultsError` | No search backend returned results |
+| `APIStatusError` | Any other error response; `error.status_code` has the status |
 | `APIConnectionError` | The server could not be reached |
 
 ## How it works
@@ -480,9 +506,11 @@ Set environment variables on the server, or copy [`.env.example`](.env.example) 
 | `FETCH_CONCURRENCY` | `10` | Page downloads at once, across all requests |
 | `MAX_INFLIGHT_FETCHES` | `200` | Fetches queued or running at once; beyond this, searches use snippets |
 | `CACHE_TTL_SECONDS` | `900` | How long searches and pages stay cached |
-| `USER_AGENT` | `OpenScour/0.2 (+repository URL)` | How OpenScour identifies itself to websites |
+| `USER_AGENT` | `OpenScour/<version> (+repository URL)` | How OpenScour identifies itself to websites |
 | `RESPECT_ROBOTS_TXT` | `true` | Skip pages a site's robots.txt disallows |
 | `ALLOW_PRIVATE_NETWORK_FETCHES` | `false` | Allow fetching pages from private addresses. See [Security](#security) before enabling |
+| `RATE_LIMIT_PER_MINUTE` | `60` | Requests per minute for each API key, or each client IP when auth is off; `0` turns the limit off |
+| `TRUST_FORWARDED_FOR` | `false` | Take the client IP from `X-Forwarded-For`. Enable only behind a load balancer that sets it |
 
 Clients (the Python client and the MCP server) read `OPENSCOUR_BASE_URL` and `OPENSCOUR_API_KEY`.
 
@@ -502,14 +530,15 @@ uv sync
 uv run openscour-server --port 8000
 ```
 
-To install the server into another environment, use the `server` extra: `pip install "openscour[server] @ git+https://github.com/ivipinmishra/openscour@v0.2.0"`.
+To install the server into another environment, use the `server` extra: `pip install "openscour[server] @ git+https://github.com/ivipinmishra/openscour@v0.3.0"`.
 
 ## Security
 
 - **Server-side request forgery (SSRF) protection.** Pages are only fetched from public internet addresses. The check runs on the IP address actually being connected to, on every redirect, so URLs such as `http://169.254.169.254/` (cloud instance credentials), `http://localhost`, private network ranges, and public hostnames that resolve to private addresses are all refused with a `blocked:` error. Proxy environment variables are ignored for page fetches so they can't bypass the check.
   - `ALLOW_PRIVATE_NETWORK_FETCHES=true` turns this off, for example to search an intranet. Only do that on a deployment that untrusted callers, including AI agents reading untrusted pages, cannot reach.
-- **Honest identity and robots.txt.** OpenScour identifies itself as `OpenScour/0.2` with a link to this repository, and skips pages a site's robots.txt disallows (the `OpenScour` user-agent token, or `*`).
+- **Honest identity and robots.txt.** OpenScour identifies itself as `OpenScour/<version>` (for example `OpenScour/0.3.0`) with a link to this repository, and skips pages a site's robots.txt disallows (the `OpenScour` user-agent token, or `*`).
 - **Container hardening.** The API image runs as an unprivileged user with a read-only filesystem, no Linux capabilities and `no-new-privileges`, and has a health check. The SearXNG image is pinned to a specific release.
+- **Rate limits.** Each API key, or each client IP when auth is off, gets `RATE_LIMIT_PER_MINUTE` requests a minute, so one runaway agent can't starve other clients or get your server blocked by search engines. Limits are kept per instance.
 - **Local by default.** Docker Compose publishes both ports on `127.0.0.1` only, so nothing is reachable from other machines until you choose to expose it.
 
 ## Deploying
@@ -519,7 +548,9 @@ Before you expose OpenScour beyond your own machine:
 - Change `server.secret_key` in [`searxng/settings.yml`](searxng/settings.yml). The checked-in value is a placeholder for local use.
 - Set `API_KEYS` so only your applications can call the API, and give each client its key through `OPENSCOUR_API_KEY`.
 - Publish only the API: in `docker-compose.yml`, change `"127.0.0.1:8000:8000"` to `"8000:8000"`, ideally behind HTTPS. Keep SearXNG's port local or remove it.
-- Run more than one API instance only with a shared cache; the built-in cache lives in each process.
+- Point your load balancer's health check at `/health/ready`, and the container's liveness check at `/health`.
+- Behind a load balancer, set `TRUST_FORWARDED_FOR=true` so rate limits apply to each client rather than to the load balancer. Without API keys, a client could otherwise share or dodge limits.
+- Run more than one API instance only with a shared cache; the built-in cache and rate limits live in each process.
 
 ## Known limitations
 

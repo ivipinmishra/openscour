@@ -1,6 +1,6 @@
 from mcp import Client
 
-from openscour.mcp_server import MAX_EXTRACT_CHARS, format_extract, format_search, server
+from openscour.mcp_server import MAX_EXTRACT_CHARS, _shared_client, format_extract, format_search, server
 from openscour.types import ExtractResponse, ExtractResult, FailedResult, SearchResponse, SearchResult
 
 
@@ -56,3 +56,7 @@ async def test_extract_tool_offers_query():
     props = tools["extract"].input_schema["properties"]
     assert {"urls", "query", "chunks_per_source"} <= set(props)
     assert tools["extract"].input_schema["required"] == ["urls"]
+
+
+async def test_tool_calls_share_one_client():
+    assert _shared_client() is _shared_client()

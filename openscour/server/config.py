@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from openscour import __version__
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -35,12 +37,19 @@ class Settings(BaseSettings):
     extract_max_tasks_per_child: int = 500
 
     # Identify honestly to the sites OpenScour reads, and follow their robots.txt.
-    user_agent: str = "OpenScour/0.2 (+https://github.com/ivipinmishra/openscour)"
+    user_agent: str = f"OpenScour/{__version__} (+https://github.com/ivipinmishra/openscour)"
     respect_robots_txt: bool = True
     # Pages are only fetched from public internet addresses (SSRF protection).
     # Set to true only for a trusted, internal-only deployment that must read
     # intranet pages; never on a server untrusted callers can reach.
     allow_private_network_fetches: bool = False
+
+    # Requests per minute for each API key (or each client IP when auth is off),
+    # across /search and /extract. 0 turns rate limiting off.
+    rate_limit_per_minute: int = 60
+    # Take the client IP from the X-Forwarded-For header set by a load balancer.
+    # Only enable behind a proxy that sets it: clients can forge it otherwise.
+    trust_forwarded_for: bool = False
 
     @property
     def api_key_set(self) -> set[str]:

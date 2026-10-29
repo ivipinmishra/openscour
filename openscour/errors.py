@@ -25,3 +25,11 @@ class InvalidRequestError(APIStatusError):
 
 class NoResultsError(APIStatusError):
     """No search backend returned results (HTTP 502)."""
+
+
+class RateLimitError(APIStatusError):
+    """Too many requests (HTTP 429). ``retry_after`` is the seconds the server asked to wait, if it said."""
+
+    def __init__(self, message: str, status_code: int, body: object = None, retry_after: float | None = None):
+        super().__init__(message, status_code, body)
+        self.retry_after = retry_after

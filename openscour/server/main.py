@@ -1,12 +1,16 @@
 import asyncio
 import hashlib
 import logging
+import math
+import re
 import secrets
 import time
+import uuid
 from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from openscour.server import providers
@@ -25,9 +29,11 @@ from openscour.server.models import (
 )
 from openscour.server.netguard import guarded_transport
 from openscour.server.ranker import Doc, rank, relevant_passages
+from openscour.server.ratelimit import RateLimiter
 from openscour.server.robots import RobotsChecker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+access_log = logging.getLogger("openscour.access")
 
 # depth -> (extra candidates fetched beyond max_results, chunks per result, fetch timeout, deadline)
 # A deadline returns early with whatever pages are ready; None waits for every page.
@@ -56,6 +62,7 @@ async def lifespan(app: FastAPI):
     app.state.page_http = httpx.AsyncClient(headers=headers, transport=transport, trust_env=False)
     robots = RobotsChecker(app.state.page_http) if settings.respect_robots_txt else None
     app.state.pages = PageFetcher(app.state.page_http, page_cache, robots)
+    app.state.limiter = RateLimiter(settings.rate_limit_per_minute) if settings.rate_limit_per_minute > 0 else None
     await asyncio.to_thread(warm_up_extractors)
     yield
     await app.state.page_http.aclose()
@@ -63,14 +70,47 @@ async def lifespan(app: FastAPI):
     shutdown_extractors()
 
 
-app = FastAPI(title="OpenScour", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="OpenScour", version="0.3.0", lifespan=lifespan)
 bearer = HTTPBearer(auto_error=False)
 
+# Request IDs from callers are echoed back only if they are short and plain.
+_REQUEST_ID = re.compile(r"[A-Za-z0-9._-]{1,128}")
+_HEALTH_PATHS = ("/health", "/health/ready")
 
-def require_api_key(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> None:
+
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    """Tags each request with an ID (X-Request-ID) and logs one line when it finishes."""
+    request_id = request.headers.get("x-request-id", "")
+    if not _REQUEST_ID.fullmatch(request_id):
+        request_id = uuid.uuid4().hex
+    request.state.request_id = request_id
+    start = time.perf_counter()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+    finally:
+        fields = {
+            "request_id": request_id,
+            "method": request.method,
+            "path": request.url.path,
+            "status": status,
+            "duration_ms": round((time.perf_counter() - start) * 1000),
+            **getattr(request.state, "log_fields", {}),
+        }
+        # Load balancers poll the health checks every few seconds; keep them out of the log.
+        level = logging.DEBUG if request.url.path in _HEALTH_PATHS else logging.INFO
+        access_log.log(level, " ".join(f"{k}={v}" for k, v in fields.items()))
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+def require_api_key(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> str | None:
+    """Checks the bearer token; returns a fingerprint of the matched key, or None when auth is off."""
     keys = settings.api_key_set
     if not keys:
-        return
+        return None
     token = creds.credentials if creds is not None else ""
     token_digest = hashlib.sha256(token.encode()).digest()
     matched = False
@@ -78,14 +118,57 @@ def require_api_key(creds: HTTPAuthorizationCredentials | None = Depends(bearer)
         matched |= secrets.compare_digest(token_digest, hashlib.sha256(key.encode()).digest())
     if creds is None or not matched:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
+    return token_digest.hex()[:16]
+
+
+def client_ip(request: Request) -> str:
+    if settings.trust_forwarded_for and (forwarded := request.headers.get("x-forwarded-for")):
+        # The proxy appends the address it saw last; earlier entries come from the client.
+        return forwarded.rsplit(",", 1)[-1].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def rate_limit(request: Request, key: str | None = Depends(require_api_key)) -> None:
+    """Limits each API key, or each client IP when auth is off (after auth, so bad keys get 401)."""
+    limiter: RateLimiter | None = request.app.state.limiter
+    if limiter is None:
+        return
+    client = f"key:{key}" if key else f"ip:{client_ip(request)}"
+    if (wait := limiter.acquire(client)) is not None:
+        raise HTTPException(
+            status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(math.ceil(wait))}
+        )
 
 
 @app.get("/health")
 async def health():
+    """Liveness: the process is up. Checks nothing else, so it stays fast."""
     return {"status": "ok"}
 
 
-@app.post("/search", response_model=SearchResponse, dependencies=[Depends(require_api_key)])
+@app.get("/health/ready")
+async def ready(request: Request):
+    """Readiness: whether this instance can serve searches, for load balancers.
+
+    When SearXNG is down but the DuckDuckGo fallback is on, searches still work,
+    so the instance reports "degraded" and stays in service: failing every
+    instance at once for a shared dependency would turn degraded into down.
+    """
+    try:
+        resp = await request.app.state.http.get(f"{settings.searxng_url.rstrip('/')}/healthz", timeout=2.0)
+        searxng = "ok" if resp.status_code == 200 else "error"
+    except httpx.HTTPError:
+        searxng = "error"
+    if searxng == "ok":
+        status, code = "ready", 200
+    elif settings.duckduckgo_fallback:
+        status, code = "degraded", 200
+    else:
+        status, code = "not ready", 503
+    return JSONResponse({"status": status, "checks": {"searxng": searxng}}, status_code=code)
+
+
+@app.post("/search", response_model=SearchResponse, dependencies=[Depends(rate_limit)])
 async def search(req: SearchRequest, request: Request) -> SearchResponse:
     start = time.perf_counter()
     # Domain lists in a different order are the same search.
@@ -94,6 +177,7 @@ async def search(req: SearchRequest, request: Request) -> SearchResponse:
     )
     cache_key = hashlib.sha256(normalized.model_dump_json().encode()).hexdigest()
     if (hit := search_cache.get(cache_key)) is not None:
+        request.state.log_fields = {"cache": "hit", "results": len(hit.results)}
         return hit.model_copy(update={"response_time": round(time.perf_counter() - start, 3)})
 
     extra, chunks_per_doc, timeout, deadline = DEPTH[req.search_depth]
@@ -152,10 +236,16 @@ async def search(req: SearchRequest, request: Request) -> SearchResponse:
         response_time=round(time.perf_counter() - start, 3),
     )
     search_cache.set(cache_key, resp)
+    request.state.log_fields = {
+        "cache": "miss",
+        "candidates": len(raw),
+        "pages_fetched": sum(isinstance(p, str) for p in pages.values()),
+        "results": len(results),
+    }
     return resp
 
 
-@app.post("/extract", response_model=ExtractResponse, dependencies=[Depends(require_api_key)])
+@app.post("/extract", response_model=ExtractResponse, dependencies=[Depends(rate_limit)])
 async def extract(req: ExtractRequest, request: Request) -> ExtractResponse:
     start = time.perf_counter()
     urls = list(dict.fromkeys(str(u) for u in req.urls))
@@ -168,6 +258,7 @@ async def extract(req: ExtractRequest, request: Request) -> ExtractResponse:
             else v
             for u, v in pages.items()
         }
+    request.state.log_fields = {"urls": len(urls), "extracted": sum(isinstance(v, str) for v in pages.values())}
     return ExtractResponse(
         results=[ExtractResult(url=u, raw_content=v) for u, v in pages.items() if isinstance(v, str)],
         failed_results=[FailedResult(url=u, error=str(v)) for u, v in pages.items() if not isinstance(v, str)],

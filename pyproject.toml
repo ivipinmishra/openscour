@@ -1,6 +1,6 @@
 [project]
 name = "openscour"
-version = "0.2.0"
+version = "0.3.0"
 description = "Self-hosted web search API for LLMs and agents that returns answer-first passages"
 readme = "README.md"
 license = "MIT"

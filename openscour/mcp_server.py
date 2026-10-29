@@ -8,10 +8,10 @@ configured with OPENSCOUR_BASE_URL and OPENSCOUR_API_KEY.
 
 from __future__ import annotations
 
-from typing import Literal
-
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -36,16 +36,28 @@ server = MCPServer(name="openscour", instructions=INSTRUCTIONS)
 _READ_ONLY_WEB = ToolAnnotations(readOnlyHint=True, openWorldHint=True)
 
 
+# One client for the session, so tool calls reuse open connections. Tied to the
+# event loop it was made on, since an async HTTP client can't move between loops.
+_shared: tuple[asyncio.AbstractEventLoop, AsyncOpenScour] | None = None
+
+
+def _shared_client() -> AsyncOpenScour:
+    global _shared
+    loop = asyncio.get_running_loop()
+    if _shared is None or _shared[0] is not loop:
+        _shared = (loop, AsyncOpenScour())
+    return _shared[1]
+
+
 @asynccontextmanager
 async def _client() -> AsyncIterator[AsyncOpenScour]:
-    """An OpenScour client whose errors reach the agent as readable tool errors.
+    """The shared OpenScour client, with errors that reach the agent as readable tool errors.
 
     Other exceptions only show the agent "Error executing tool", which gives it
     nothing to act on (e.g. that the OpenScour server isn't running).
     """
     try:
-        async with AsyncOpenScour() as client:
-            yield client
+        yield _shared_client()
     except APIConnectionError as e:
         raise ToolError(f"{e}. Is the OpenScour server running?") from e
     except OpenScourError as e:

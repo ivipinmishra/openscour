@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import os
+import random
+import time
 from typing import Any, Literal
 
 import httpx
@@ -11,11 +14,23 @@ from openscour.errors import (
     AuthenticationError,
     InvalidRequestError,
     NoResultsError,
+    RateLimitError,
 )
 from openscour.types import ExtractResponse, SearchResponse
 
 DEFAULT_BASE_URL = "http://localhost:8000"
 DEFAULT_TIMEOUT = 60.0
+DEFAULT_MAX_RETRIES = 2
+# Longest wait between retries; a longer Retry-After is raised to the caller instead.
+MAX_RETRY_WAIT = 30.0
+
+# Connection failures that happen before the server could act on the request.
+# Read timeouts are not retried: the search may still be running.
+_RETRYABLE_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError)
+
+# Module-level so tests can skip the waiting.
+_sleep = time.sleep
+_async_sleep = asyncio.sleep
 
 SearchDepth = Literal["basic", "advanced"]
 Topic = Literal["general", "news"]
@@ -54,6 +69,31 @@ def _extract_body(urls: str | list[str], query: str | None, chunks_per_source: i
     return body
 
 
+def _is_json(resp: httpx.Response) -> bool:
+    return resp.headers.get("content-type", "").startswith("application/json")
+
+
+def _retry_after(resp: httpx.Response) -> float | None:
+    try:
+        return max(0.0, float(resp.headers["retry-after"]))
+    except (KeyError, ValueError):
+        return None
+
+
+def _retry_wait(attempt: int, resp: httpx.Response | None = None) -> float | None:
+    """Seconds to wait before retrying, or None if this outcome should not be retried."""
+    if resp is not None:
+        # OpenScour's own 502 means no search results, which a retry won't change;
+        # a 502 page from a proxy in front of it is transient.
+        transient = resp.status_code in (429, 503, 504) or (resp.status_code == 502 and not _is_json(resp))
+        if not transient:
+            return None
+        if (wait := _retry_after(resp)) is not None:
+            return wait if wait <= MAX_RETRY_WAIT else None
+    # Exponential backoff with jitter, so many clients don't retry in step.
+    return min(MAX_RETRY_WAIT, 0.5 * 2**attempt) * random.uniform(0.5, 1.0)
+
+
 def _raise_for_status(resp: httpx.Response) -> None:
     if resp.is_success:
         return
@@ -63,6 +103,10 @@ def _raise_for_status(resp: httpx.Response) -> None:
     except ValueError:
         body = detail = resp.text
     message = detail if isinstance(detail, str) else str(detail)
+    if resp.status_code == 429:
+        raise RateLimitError(message, 429, body, retry_after=_retry_after(resp))
+    if resp.status_code == 502 and not _is_json(resp):
+        raise APIStatusError(message, 502, body)
     error = {401: AuthenticationError, 422: InvalidRequestError, 502: NoResultsError}.get(
         resp.status_code, APIStatusError
     )
@@ -70,7 +114,8 @@ def _raise_for_status(resp: httpx.Response) -> None:
 
 
 class _BaseClient:
-    def __init__(self, api_key: str | None, base_url: str | None):
+    def __init__(self, api_key: str | None, base_url: str | None, max_retries: int):
+        self.max_retries = max_retries
         self.api_key = api_key if api_key is not None else os.environ.get("OPENSCOUR_API_KEY")
         self.base_url = (base_url or os.environ.get("OPENSCOUR_BASE_URL") or DEFAULT_BASE_URL).rstrip("/")
 
@@ -86,7 +131,9 @@ class OpenScour(_BaseClient):
     >>> response.results[0].content
 
     ``api_key`` and ``base_url`` default to the ``OPENSCOUR_API_KEY`` and
-    ``OPENSCOUR_BASE_URL`` environment variables.
+    ``OPENSCOUR_BASE_URL`` environment variables. Requests that fail to connect
+    or get 429, 503 or 504 are retried up to ``max_retries`` times, honoring the
+    server's Retry-After.
     """
 
     def __init__(
@@ -95,17 +142,28 @@ class OpenScour(_BaseClient):
         base_url: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.Client | None = None,
+        max_retries: int = DEFAULT_MAX_RETRIES,
     ):
-        super().__init__(api_key, base_url)
+        super().__init__(api_key, base_url, max_retries)
         self._client = http_client or httpx.Client(timeout=timeout)
 
     def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
-        try:
-            resp = self._client.post(f"{self.base_url}{path}", json=body, headers=self._headers())
-        except httpx.HTTPError as e:
-            raise APIConnectionError(f"Could not reach OpenScour at {self.base_url}: {e}") from e
-        _raise_for_status(resp)
-        return resp.json()
+        attempt = 0
+        while True:
+            try:
+                resp = self._client.post(f"{self.base_url}{path}", json=body, headers=self._headers())
+            except httpx.HTTPError as e:
+                if isinstance(e, _RETRYABLE_ERRORS) and attempt < self.max_retries:
+                    _sleep(_retry_wait(attempt))
+                    attempt += 1
+                    continue
+                raise APIConnectionError(f"Could not reach OpenScour at {self.base_url}: {e}") from e
+            if attempt < self.max_retries and (wait := _retry_wait(attempt, resp)) is not None:
+                _sleep(wait)
+                attempt += 1
+                continue
+            _raise_for_status(resp)
+            return resp.json()
 
     def search(
         self,
@@ -151,17 +209,28 @@ class AsyncOpenScour(_BaseClient):
         base_url: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.AsyncClient | None = None,
+        max_retries: int = DEFAULT_MAX_RETRIES,
     ):
-        super().__init__(api_key, base_url)
+        super().__init__(api_key, base_url, max_retries)
         self._client = http_client or httpx.AsyncClient(timeout=timeout)
 
     async def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
-        try:
-            resp = await self._client.post(f"{self.base_url}{path}", json=body, headers=self._headers())
-        except httpx.HTTPError as e:
-            raise APIConnectionError(f"Could not reach OpenScour at {self.base_url}: {e}") from e
-        _raise_for_status(resp)
-        return resp.json()
+        attempt = 0
+        while True:
+            try:
+                resp = await self._client.post(f"{self.base_url}{path}", json=body, headers=self._headers())
+            except httpx.HTTPError as e:
+                if isinstance(e, _RETRYABLE_ERRORS) and attempt < self.max_retries:
+                    await _async_sleep(_retry_wait(attempt))
+                    attempt += 1
+                    continue
+                raise APIConnectionError(f"Could not reach OpenScour at {self.base_url}: {e}") from e
+            if attempt < self.max_retries and (wait := _retry_wait(attempt, resp)) is not None:
+                await _async_sleep(wait)
+                attempt += 1
+                continue
+            _raise_for_status(resp)
+            return resp.json()
 
     async def search(
         self,

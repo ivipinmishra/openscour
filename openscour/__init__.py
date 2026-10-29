@@ -14,10 +14,11 @@ from openscour.errors import (
     InvalidRequestError,
     NoResultsError,
     OpenScourError,
+    RateLimitError,
 )
 from openscour.types import ExtractResponse, ExtractResult, FailedResult, SearchResponse, SearchResult
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "OpenScour",
@@ -33,4 +34,5 @@ __all__ = [
     "AuthenticationError",
     "InvalidRequestError",
     "NoResultsError",
+    "RateLimitError",
 ]

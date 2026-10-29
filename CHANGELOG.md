@@ -2,9 +2,24 @@
 
 All notable changes to OpenScour are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-10-29
+
+Operations and client resilience (phase 2 of the enterprise roadmap).
+
+### Server
+- Rate limits: `RATE_LIMIT_PER_MINUTE` (default 60) requests a minute per API key, or per client IP when auth is off. Excess requests get `429` with a `Retry-After` header. `TRUST_FORWARDED_FOR` takes the client IP from a load balancer's `X-Forwarded-For`.
+- `GET /health/ready` for load balancers: checks SearXNG, and reports "degraded" rather than failing while the DuckDuckGo fallback can serve searches.
+- Request IDs: every response has an `X-Request-ID` header (the caller's own, or a generated one), and each request is logged on one line with its ID, status, duration, cache hit or miss, and pages read.
+
+### Python client
+- Retries transient failures (connection failures, `429`, `503`, `504`, and `502` from a proxy) with exponential backoff, honoring `Retry-After`. Set `max_retries` (default 2); `0` turns retries off.
+- New `RateLimitError` with `retry_after`. A `502` that doesn't come from OpenScour is now an `APIStatusError` instead of `NoResultsError`.
+
+### MCP server
+- Reuses one client, and its connections, for all tool calls.
 
 ### Security
+- The user agent follows the package version (`OpenScour/0.3.0`) instead of a fixed `OpenScour/0.2`.
 - API keys are compared in constant time.
 - robots.txt downloads stop at 512 KB instead of reading the whole response first.
 
@@ -55,5 +70,6 @@ First release.
 ### MCP server
 - `openscour-mcp` gives AI agents read-only `search` and `extract` tools, with setup instructions for Claude Code, Kiro, Cursor, Claude Desktop and VS Code.
 
+[0.3.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.1.0
