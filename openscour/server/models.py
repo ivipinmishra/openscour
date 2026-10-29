@@ -33,6 +33,9 @@ class SearchResponse(BaseModel):
 
 class ExtractRequest(BaseModel):
     urls: list[HttpUrl] = Field(min_length=1, max_length=20)
+    # With a query, each result holds only the page's most relevant passages.
+    query: str | None = Field(default=None, min_length=1, max_length=400)
+    chunks_per_source: int = Field(default=3, ge=1, le=10)
 
 
 class ExtractResult(BaseModel):

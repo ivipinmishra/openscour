@@ -121,16 +121,22 @@ async def search(
 
 
 @server.tool(
-    description="Get the clean main text of one or more web pages, without navigation or ads.",
+    description=(
+        "Read web pages. Pass `query` with what you are looking for to get only the most "
+        "relevant passages of each page (short, recommended); without it you get the full "
+        "page text, which can be very long."
+    ),
     annotations=_READ_ONLY_WEB,
 )
-async def extract(urls: list[str]) -> str:
+async def extract(urls: list[str], query: str | None = None, chunks_per_source: int = 3) -> str:
     """
     Args:
         urls: Up to 20 http(s) URLs to read.
+        query: What you need from the pages, e.g. "new Bedrock models in October 2026".
+        chunks_per_source: With a query, how many passages to return per page (1 to 10).
     """
     async with _client() as client:
-        response = await client.extract(urls)
+        response = await client.extract(urls, query=query, chunks_per_source=chunks_per_source)
     return format_extract(response)
 
 

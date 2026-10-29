@@ -28,7 +28,7 @@ from openscour.server.models import (
     SearchResponse,
     SearchResult,
 )
-from openscour.server.ranker import Doc, rank
+from openscour.server.ranker import Doc, rank, relevant_passages
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -205,6 +205,14 @@ async def extract(req: ExtractRequest, request: Request) -> ExtractResponse:
     start = time.perf_counter()
     urls = list(dict.fromkeys(str(u) for u in req.urls))
     pages = await fetch_cached(request.app.state.http, urls, settings.fetch_timeout)
+    if req.query:
+        # Ranking is CPU work; keep it off the event loop.
+        pages = {
+            u: await asyncio.to_thread(relevant_passages, req.query, v, "", req.chunks_per_source)
+            if isinstance(v, str)
+            else v
+            for u, v in pages.items()
+        }
     return ExtractResponse(
         results=[ExtractResult(url=u, raw_content=v) for u, v in pages.items() if isinstance(v, str)],
         failed_results=[FailedResult(url=u, error=str(v)) for u, v in pages.items() if not isinstance(v, str)],

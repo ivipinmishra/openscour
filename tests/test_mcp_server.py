@@ -48,3 +48,11 @@ def test_format_extract_truncates_and_reports_failures():
     assert f"truncated, {len(long_text)} characters in total" in text
     assert "URL: https://bad.invalid\nCould not extract: ConnectError" in text
     assert len(text) < MAX_EXTRACT_CHARS + 300
+
+
+async def test_extract_tool_offers_query():
+    async with Client(server) as client:
+        tools = {t.name: t for t in (await client.list_tools()).tools}
+    props = tools["extract"].input_schema["properties"]
+    assert {"urls", "query", "chunks_per_source"} <= set(props)
+    assert tools["extract"].input_schema["required"] == ["urls"]

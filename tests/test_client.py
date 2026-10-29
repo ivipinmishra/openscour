@@ -108,3 +108,15 @@ async def test_async_client():
     async with AsyncOpenScour(http_client=httpx.AsyncClient(transport=make_transport(seen))) as client:
         response = await client.search("Latest AWS Bedrock updates")
     assert response.results[0].title == "What's new in Bedrock"
+
+
+def test_extract_with_query_sends_query_and_passage_count():
+    seen: list[httpx.Request] = []
+    body = {"results": [{"url": "https://a.com", "raw_content": "passage"}], "failed_results": [], "response_time": 0.1}
+    client = OpenScour(http_client=httpx.Client(transport=make_transport(seen, body=body)))
+    client.extract(["https://a.com"], query="bedrock models", chunks_per_source=2)
+    assert json.loads(seen[0].content) == {
+        "urls": ["https://a.com"],
+        "query": "bedrock models",
+        "chunks_per_source": 2,
+    }

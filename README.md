@@ -23,7 +23,7 @@ print(response.results[0].content)
 - **Answer-first passages.** Results are ranked passages from real pages, not just links. For questions like *when*, *who* and *how many*, the passage that contains the answer comes first and starts at the answering sentence.
 - **Topic-aware and fresh.** Searches such as *"Latest AWS Bedrock updates"* require the named topic in each passage and favor recent content.
 - **No paid search provider.** Results come from a self-hosted [SearXNG](https://github.com/searxng/searxng) meta-search engine, with a DuckDuckGo fallback.
-- **Clean text extraction.** Navigation, cookie banners, reference lists and footnote markers are removed. The `/extract` endpoint returns the clean text of any URL.
+- **Clean text extraction.** Navigation, cookie banners, reference lists and footnote markers are removed. The `/extract` endpoint returns the clean text of any URL, or, given a query, only the passages that matter (often 95% shorter).
 - **MCP server for AI agents.** Register OpenScour once in Claude Code, Cursor or any MCP client, and the agent can search the web and read pages on its own.
 - **Typed Python client.** `OpenScour` and `AsyncOpenScour` return typed results and raise typed errors. The client only depends on `httpx`.
 - **Plain HTTP API.** Any language can call `POST /search` and `POST /extract`.
@@ -85,7 +85,7 @@ OpenScour includes an [MCP](https://modelcontextprotocol.io) server, so AI agent
 | Tool | What it does |
 |---|---|
 | `search` | Searches the web and returns numbered results with title, URL and the best passage. Takes the same options as the Python client. |
-| `extract` | Returns the clean main text of up to 20 URLs. |
+| `extract` | Reads up to 20 URLs. With a `query`, returns only each page's most relevant passages, so long pages don't flood the agent's context; without one, the full text (capped at 20,000 characters per page). |
 
 Both tools are read-only. The MCP server talks to your OpenScour server, so start that first (see Quickstart).
 
@@ -166,6 +166,14 @@ response = client.search(
 pages = client.extract(["https://en.wikipedia.org/wiki/Web_search_engine"])
 print(pages.results[0].raw_content)
 print(pages.failed_results)         # URLs that could not be fetched, with the reason
+
+# Only the parts of each page that match a query, instead of the whole page
+pages = client.extract(
+    ["https://en.wikipedia.org/wiki/Vice_President_of_the_United_States"],
+    query="Who is the current vice president?",
+    chunks_per_source=3,            # passages per page, 1 to 10
+)
+print(pages.results[0].raw_content)  # about 1,200 characters instead of about 55,000
 ```
 
 For async code, `AsyncOpenScour` has the same methods:
@@ -240,7 +248,13 @@ curl -X POST http://localhost:8000/extract \
   -d '{"urls": ["https://en.wikipedia.org/wiki/Web_search_engine"]}'
 ```
 
-Takes up to 20 URLs. Returns the clean text of each page in `results` and per-URL errors in `failed_results`.
+| Field | Default | Description |
+|---|---|---|
+| `urls` | required | Up to 20 URLs |
+| `query` | `null` | If set, each result holds only the page's most relevant passages, in page order, instead of the full text |
+| `chunks_per_source` | `3` | With `query`: passages per page, 1 to 10 |
+
+Returns the text of each page in `results` (as `raw_content`) and per-URL errors in `failed_results`.
 
 ### `GET /health`
 

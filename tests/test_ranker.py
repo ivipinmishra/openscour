@@ -220,3 +220,31 @@ def test_latest_release_question_prefers_current_version_sentence():
     ]
     top = rank("latest Python release", docs, chunks_per_doc=1)[0]
     assert top.doc.url == "https://new.example"
+
+
+def test_relevant_passages_keeps_only_matching_parts_in_page_order():
+    from openscour.server.ranker import PASSAGE_SEPARATOR, relevant_passages
+
+    filler = "This section covers unrelated setup details for the console. " * 12
+    page = "\n".join(
+        [
+            filler,
+            "Amazon Bedrock added two new models in October 2026, including a faster reasoning model.",
+            filler,
+            "In October 2026 Bedrock also gained structured output support for all models.",
+            filler,
+        ]
+    )
+    out = relevant_passages("new Bedrock models October 2026", page, max_passages=2)
+    assert "two new models" in out and "structured output" in out
+    # Short paragraphs are merged with a little neighbouring text, but most of the page is dropped.
+    assert len(out) < len(page) / 2
+    assert out.index("two new models") < out.index("structured output")
+    assert out.count(PASSAGE_SEPARATOR) == 1
+
+
+def test_relevant_passages_falls_back_to_page_start_when_nothing_matches():
+    from openscour.server.ranker import relevant_passages
+
+    page = "Opening paragraph about gardening.\nSecond paragraph about soil."
+    assert relevant_passages("quantum computing", page, max_passages=1).startswith("Opening paragraph")

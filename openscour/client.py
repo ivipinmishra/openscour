@@ -46,6 +46,14 @@ def _search_body(
     }
 
 
+def _extract_body(urls: str | list[str], query: str | None, chunks_per_source: int) -> dict[str, Any]:
+    body: dict[str, Any] = {"urls": [urls] if isinstance(urls, str) else urls}
+    if query:
+        body["query"] = query
+        body["chunks_per_source"] = chunks_per_source
+    return body
+
+
 def _raise_for_status(resp: httpx.Response) -> None:
     if resp.is_success:
         return
@@ -118,9 +126,11 @@ class OpenScour(_BaseClient):
         )  # fmt: skip
         return SearchResponse.from_dict(self._post("/search", body))
 
-    def extract(self, urls: str | list[str]) -> ExtractResponse:
-        urls = [urls] if isinstance(urls, str) else urls
-        return ExtractResponse.from_dict(self._post("/extract", {"urls": urls}))
+    def extract(
+        self, urls: str | list[str], *, query: str | None = None, chunks_per_source: int = 3
+    ) -> ExtractResponse:
+        """Clean text of each page; with ``query``, only its most relevant passages."""
+        return ExtractResponse.from_dict(self._post("/extract", _extract_body(urls, query, chunks_per_source)))
 
     def close(self) -> None:
         self._client.close()
@@ -172,9 +182,11 @@ class AsyncOpenScour(_BaseClient):
         )  # fmt: skip
         return SearchResponse.from_dict(await self._post("/search", body))
 
-    async def extract(self, urls: str | list[str]) -> ExtractResponse:
-        urls = [urls] if isinstance(urls, str) else urls
-        return ExtractResponse.from_dict(await self._post("/extract", {"urls": urls}))
+    async def extract(
+        self, urls: str | list[str], *, query: str | None = None, chunks_per_source: int = 3
+    ) -> ExtractResponse:
+        """Clean text of each page; with ``query``, only its most relevant passages."""
+        return ExtractResponse.from_dict(await self._post("/extract", _extract_body(urls, query, chunks_per_source)))
 
     async def close(self) -> None:
         await self._client.aclose()

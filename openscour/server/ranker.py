@@ -370,3 +370,21 @@ def rank(query: str, docs: list[Doc], chunks_per_doc: int) -> list[Ranked]:
     ]
     out.sort(key=lambda r: r.score, reverse=True)
     return out
+
+
+PASSAGE_SEPARATOR = "\n\n…\n\n"
+
+
+def relevant_passages(query: str, text: str, title: str = "", max_passages: int = 3) -> str:
+    """The passages of one page that best match the query, in page order.
+
+    Lets an agent read the parts of a long page that matter instead of the
+    whole page. If nothing matches, the page's opening passages are returned.
+    """
+    doc = Doc(url="", title=title, text=text, rank=0)
+    ranked = rank(query, [doc], max_passages)
+    if not ranked:
+        return ""
+    if ranked[0].score == 0:
+        return PASSAGE_SEPARATOR.join(doc.chunks[:max_passages])
+    return ranked[0].content.replace(" … ", PASSAGE_SEPARATOR)
