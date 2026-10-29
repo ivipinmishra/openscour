@@ -5,6 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![Docker](https://img.shields.io/badge/docker-compose-2496ED.svg)](docker-compose.yml)
+[![MCP](https://img.shields.io/badge/MCP-server-5c4ee5.svg)](#option-3-ai-agents-mcp)
 
 OpenScour searches the web, reads the result pages and returns the passages that actually answer your query, ready to drop into an LLM prompt. You run it on your own machine or cloud account, and it needs no API key from any search provider.
 
@@ -18,23 +19,35 @@ print(response.results[0].content)
 # JD Vance is the 50th and current vice president since January 20, 2025.
 ```
 
+## Contents
+
+- [Features](#features)
+- [Step 1: Start the server](#step-1-start-the-server)
+- [Step 2: Choose how to use it](#step-2-choose-how-to-use-it)
+  - [Option 1: HTTP API (any language)](#option-1-http-api-any-language)
+  - [Option 2: Python client](#option-2-python-client)
+  - [Option 3: AI agents (MCP)](#option-3-ai-agents-mcp)
+- [API reference](#api-reference)
+- [Python client reference](#python-client-reference)
+- [How it works](#how-it-works)
+- [Configuration](#configuration)
+- [Deploying](#deploying)
+- [Known limitations](#known-limitations)
+- [Development](#development)
+
 ## Features
 
 - **Answer-first passages.** Results are ranked passages from real pages, not just links. For questions like *when*, *who* and *how many*, the passage that contains the answer comes first and starts at the answering sentence.
 - **Topic-aware and fresh.** Searches such as *"Latest AWS Bedrock updates"* require the named topic in each passage and favor recent content.
 - **No paid search provider.** Results come from a self-hosted [SearXNG](https://github.com/searxng/searxng) meta-search engine, with a DuckDuckGo fallback.
-- **Clean text extraction.** Navigation, cookie banners, reference lists and footnote markers are removed. The `/extract` endpoint returns the clean text of any URL, or, given a query, only the passages that matter (often 95% shorter).
-- **MCP server for AI agents.** Register OpenScour once in Claude Code, Cursor or any MCP client, and the agent can search the web and read pages on its own.
-- **Typed Python client.** `OpenScour` and `AsyncOpenScour` return typed results and raise typed errors. The client only depends on `httpx`.
-- **Plain HTTP API.** Any language can call `POST /search` and `POST /extract`.
+- **Clean text extraction.** Navigation, cookie banners, reference lists and footnote markers are removed. Given a query, extraction returns only the passages that matter, often 95% shorter than the page.
+- **Three ways in.** A plain HTTP API for any language, a typed Python client, and an MCP server for AI agents such as Claude Code, Kiro and Cursor.
 - **Optional AI answers.** Claude can write a short cited answer from the top passages, through Amazon Bedrock or the Claude API.
 - **Runs anywhere Docker runs**, from a laptop to AWS.
 
-## Quickstart
+## Step 1: Start the server
 
-Requirements: [Docker](https://docs.docker.com/get-docker/) and Python 3.11 or newer.
-
-**1. Start the server**
+Every way of using OpenScour talks to an OpenScour server, so start one first. You need [Docker](https://docs.docker.com/get-docker/).
 
 ```bash
 git clone https://github.com/ivipinmishra/openscour.git
@@ -48,11 +61,74 @@ cd openscour
 docker compose up -d --build
 ```
 
-This starts SearXNG and the OpenScour API on http://localhost:8000. Check it with `curl http://localhost:8000/health`, or open the interactive API docs at http://localhost:8000/docs.
+This starts SearXNG and the OpenScour API on **http://localhost:8000**. Check that it's running:
 
-**2. Install the client in your project**
+```bash
+curl http://localhost:8000/health
+```
 
-OpenScour is not on PyPI yet, so install it from GitHub. With [uv](https://docs.astral.sh/uv/):
+It should print `{"status":"ok"}`. Interactive API docs are at http://localhost:8000/docs.
+
+To stop it, run `docker compose down` in the same folder. To run it on a server for others, see [Deploying](#deploying).
+
+## Step 2: Choose how to use it
+
+| You want to… | Use | Needs |
+|---|---|---|
+| Call OpenScour from any language (JavaScript, Go, Java, …) or a tool like Postman | [Option 1: HTTP API](#option-1-http-api-any-language) | Nothing to install |
+| Use OpenScour from Python code | [Option 2: Python client](#option-2-python-client) | `pip` or `uv` |
+| Let an AI agent search the web on its own | [Option 3: AI agents (MCP)](#option-3-ai-agents-mcp) | [uv](https://docs.astral.sh/uv/) and an MCP client such as Claude Code, Kiro or Cursor |
+
+All three use the same two operations:
+
+- **search:** search the web and get the best passage from each result page.
+- **extract:** read specific URLs and get their clean text, or only the parts that match a query.
+
+### Option 1: HTTP API (any language)
+
+Send JSON to the server with any HTTP client.
+
+**Search:**
+
+```bash
+curl -X POST http://localhost:8000/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Latest AWS Bedrock updates", "max_results": 5}'
+```
+
+**Read pages, keeping only what matches a query:**
+
+```bash
+curl -X POST http://localhost:8000/extract \
+  -H "Content-Type: application/json" \
+  -d '{"urls": ["https://en.wikipedia.org/wiki/Vice_President_of_the_United_States"], "query": "Who is the current vice president?"}'
+```
+
+**JavaScript or TypeScript** (Node.js 18+, Deno, Bun or the browser):
+
+```javascript
+const response = await fetch("http://localhost:8000/search", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ query: "Latest AWS Bedrock updates", max_results: 5 }),
+});
+const data = await response.json();
+
+for (const result of data.results) {
+  console.log(result.score, result.title, result.url);
+  console.log(result.content);
+}
+```
+
+If the server has `API_KEYS` set, add the header `Authorization: Bearer YOUR_API_KEY` to every request.
+
+Every field and the response format are in the [API reference](#api-reference).
+
+### Option 2: Python client
+
+**Install** it in your project. OpenScour is not on PyPI yet, so install it from GitHub.
+
+With [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv add git+https://github.com/ivipinmishra/openscour
@@ -64,46 +140,95 @@ Or with pip, inside a virtual environment:
 pip install git+https://github.com/ivipinmishra/openscour
 ```
 
-**3. Search**
+The client only needs `httpx`; none of the server's dependencies are installed.
+
+**Use it:**
 
 ```python
 from openscour import OpenScour
 
 client = OpenScour()  # http://localhost:8000 by default
 
+# Search
 response = client.search("Latest AWS Bedrock updates", max_results=5)
 for result in response.results:
     print(f"{result.score:.2f}  {result.title}")
     print(f"      {result.url}")
     print(f"      {result.content[:200]}")
+
+# Read pages, keeping only what matches a query
+pages = client.extract(
+    ["https://en.wikipedia.org/wiki/Vice_President_of_the_United_States"],
+    query="Who is the current vice president?",
+)
+print(pages.results[0].raw_content)
+# JD Vance is the 50th and current vice president since January 20, 2025. …
 ```
 
-## Use with AI agents (MCP)
+For a server elsewhere, or one that requires a key, pass `base_url` and `api_key`, or set `OPENSCOUR_BASE_URL` and `OPENSCOUR_API_KEY`. Every option, the async client and the error types are in the [Python client reference](#python-client-reference).
 
-OpenScour includes an [MCP](https://modelcontextprotocol.io) server, so AI agents can use it as a built-in tool. It gives the agent two tools:
+### Option 3: AI agents (MCP)
+
+OpenScour includes an [MCP](https://modelcontextprotocol.io) server that gives AI agents two tools:
 
 | Tool | What it does |
 |---|---|
-| `search` | Searches the web and returns numbered results with title, URL and the best passage. Takes the same options as the Python client. |
-| `extract` | Reads up to 20 URLs. With a `query`, returns only each page's most relevant passages, so long pages don't flood the agent's context; without one, the full text (capped at 20,000 characters per page). |
+| `search` | Searches the web and returns numbered results with title, URL and the best passage. Takes the same options as the API. |
+| `extract` | Reads up to 20 URLs. With a `query`, returns only each page's most relevant passages, so long pages don't flood the agent's context. Without one, it returns the full text, capped at 20,000 characters per page. |
 
-Both tools are read-only. The MCP server talks to your OpenScour server, so start that first (see Quickstart).
+Both tools are read-only. The MCP server runs on your machine, started by your agent, and passes requests to your OpenScour server from [Step 1](#step-1-start-the-server). You need [uv](https://docs.astral.sh/uv/) installed; it downloads and runs the MCP server from GitHub automatically.
 
-**Claude Code**, with [uv](https://docs.astral.sh/uv/) installed:
+If your OpenScour server isn't at `http://localhost:8000`, or it requires a key, set `OPENSCOUR_BASE_URL` and `OPENSCOUR_API_KEY` in the configurations below.
+
+#### Claude Code
 
 ```bash
 claude mcp add openscour -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour" openscour-mcp
 ```
 
-If your OpenScour server isn't on `http://localhost:8000`, or it requires a key, pass them as environment variables:
+With a different server address or a key:
 
 ```bash
 claude mcp add openscour -e OPENSCOUR_BASE_URL=https://search.example.com -e OPENSCOUR_API_KEY=YOUR_API_KEY -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour" openscour-mcp
 ```
 
-Then ask Claude something like *"What changed in Amazon Bedrock this month?"* and it will search with OpenScour.
+Restart Claude Code, then ask something like *"What changed in Amazon Bedrock this month?"*.
 
-**Other MCP clients** (Cursor, Claude Desktop, VS Code and others) take the same command in their JSON configuration:
+#### Kiro
+
+1. Open Kiro's MCP configuration: `~/.kiro/settings/mcp.json` for all projects, or `.kiro/settings/mcp.json` for one project. You can also use **Open MCP Config** in the Kiro panel.
+2. Add OpenScour under `mcpServers`:
+
+   ```json
+   {
+     "mcpServers": {
+       "openscour": {
+         "command": "uvx",
+         "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour", "openscour-mcp"],
+         "env": { "OPENSCOUR_BASE_URL": "http://localhost:8000" },
+         "disabled": false,
+         "autoApprove": ["search", "extract"]
+       }
+     }
+   }
+   ```
+
+   `autoApprove` lets Kiro use the read-only tools without asking each time. Remove it if you'd rather approve each call.
+3. Save. **MCP Servers** in the Kiro panel should show `openscour` as connected with 2 tools.
+4. Kiro also has its own built-in web search. To make it use OpenScour instead, add a steering file such as `~/.kiro/steering/web-search.md`:
+
+   ```markdown
+   # Web search
+
+   For any web search or reading a web page, use the `openscour` MCP server:
+   `search` to search the web, and `extract` with a `query` to read pages.
+   Do not use the built-in web search unless openscour returns an error.
+   Cite the URLs of the results you use.
+   ```
+
+#### Cursor, Claude Desktop, VS Code and other MCP clients
+
+Add the same command to the client's MCP configuration:
 
 ```json
 {
@@ -117,106 +242,36 @@ Then ask Claude something like *"What changed in Amazon Bedrock this month?"* an
 }
 ```
 
-If the OpenScour server is unreachable, the tools return an error that tells the agent so, instead of failing silently.
+The file's location depends on the client; see its documentation for "MCP servers".
 
-## How it works
+#### Updating and troubleshooting
 
-```
-                ┌────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────────┐
-query ────────► │  SearXNG   │──►│  Fetch pages │──►│ Extract text │──►│  Rank passages   │──► results
-                │ meta-search│   │  in parallel │   │ (trafilatura)│   │ BM25 + signals   │
-                └─────┬──────┘   └──────────────┘   └──────────────┘   └────────┬─────────┘
-                      │ no results                                              │ optional
-                      ▼                                                         ▼
-                 DuckDuckGo                                              Claude answer
-```
+- **Get the latest version.** uv caches the MCP server after the first download. To update, clear the cache, then restart the server in your agent or restart the agent:
 
-1. **Search.** SearXNG queries several public search engines and merges their results. If it returns nothing, OpenScour falls back to DuckDuckGo.
-2. **Fetch.** The top pages are downloaded in parallel. A `basic` search answers as soon as enough pages are ready, or after 2 seconds at most; slow pages are represented by their search snippet and keep loading in the background, so a repeat search has them.
-3. **Extract.** [trafilatura](https://github.com/adbar/trafilatura) pulls out the main text, in parallel worker processes. OpenScour then removes reference sections, footnote markers and other page clutter. Pages that yield very little text, such as video pages, also get their search snippet as a passage.
-4. **Rank.** Each page is split into passages and scored with BM25, adjusted by:
-   - **answer shape:** dates for *when*, numbers for *how many* or *how tall*, names for *who*, version numbers for *latest release* questions, with a boost for *current* holders on *who is* questions
-   - **topic coverage:** passages must mention the query's named terms, and lists of headings (tables of contents, menus) rank lower than passages that explain something
-   - **freshness:** *latest*, *new* and *recent* queries prefer this year's content
-   - **page quality:** passages near the top of a page rank higher, and boilerplate ranks lower
-5. **Answer (optional).** Claude reads the top passages and writes a short answer with citations.
+  ```bash
+  uv cache clean openscour
+  ```
 
-Searches and pages are cached in memory for 15 minutes.
+- **"command not found: uvx".** Desktop apps launched from the Dock may not see your terminal's `PATH`. Use the full path from `which uvx` as `command`, for example `/opt/homebrew/bin/uvx` on Apple Silicon Macs with Homebrew.
+- **"Could not reach OpenScour".** The OpenScour server isn't running or `OPENSCOUR_BASE_URL` is wrong. Start it as in [Step 1](#step-1-start-the-server).
 
-## Python client
-
-```python
-from openscour import OpenScour
-
-client = OpenScour(
-    api_key="YOUR_API_KEY",              # or OPENSCOUR_API_KEY
-    base_url="https://search.example.com",  # or OPENSCOUR_BASE_URL; default http://localhost:8000
-)
-
-response = client.search(
-    "AWS re:Invent announcements",
-    search_depth="advanced",        # "basic" (default) or "advanced"
-    topic="news",                   # "general" (default) or "news"
-    max_results=10,
-    time_range="week",              # "day", "week", "month" or "year"
-    include_domains=["aws.amazon.com"],
-    include_raw_content=True,       # full page text in result.raw_content
-)
-
-pages = client.extract(["https://en.wikipedia.org/wiki/Web_search_engine"])
-print(pages.results[0].raw_content)
-print(pages.failed_results)         # URLs that could not be fetched, with the reason
-
-# Only the parts of each page that match a query, instead of the whole page
-pages = client.extract(
-    ["https://en.wikipedia.org/wiki/Vice_President_of_the_United_States"],
-    query="Who is the current vice president?",
-    chunks_per_source=3,            # passages per page, 1 to 10
-)
-print(pages.results[0].raw_content)  # about 1,200 characters instead of about 55,000
-```
-
-For async code, `AsyncOpenScour` has the same methods:
-
-```python
-from openscour import AsyncOpenScour
-
-async with AsyncOpenScour() as client:
-    response = await client.search("When is the midterm election in the USA?")
-```
-
-Errors are typed and all inherit from `OpenScourError`:
-
-| Error | When |
-|---|---|
-| `AuthenticationError` | The API key is missing or wrong |
-| `InvalidRequestError` | The request was rejected, for example an empty query |
-| `NoResultsError` | No search backend returned results |
-| `APIConnectionError` | The server could not be reached |
-
-## HTTP API
+## API reference
 
 Send `Authorization: Bearer <key>` when the server has `API_KEYS` set.
 
 ### `POST /search`
 
-```bash
-curl -X POST http://localhost:8000/search \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Who is vice president in the USA?", "max_results": 3}'
-```
-
 | Field | Default | Description |
 |---|---|---|
 | `query` | required | The search query, up to 400 characters |
-| `search_depth` | `basic` | `basic` fetches `max_results + 3` pages and returns 1 passage per result. `advanced` fetches `2 × max_results` pages and returns 3 passages per result. |
+| `search_depth` | `basic` | `basic` answers within about 2 seconds and returns 1 passage per result. `advanced` reads `2 × max_results` pages, waits for all of them and returns 3 passages per result. |
 | `topic` | `general` | `general` or `news` |
 | `max_results` | `5` | 1 to 20 |
 | `time_range` | `null` | `day`, `week`, `month` or `year` |
 | `include_domains` | `[]` | Only return results from these domains |
 | `exclude_domains` | `[]` | Never return results from these domains |
-| `include_raw_content` | `false` | Include the full extracted page text |
-| `include_answer` | `false` | Generate an AI answer (needs `ANSWER_PROVIDER`, see Configuration) |
+| `include_raw_content` | `false` | Also include the full extracted page text |
+| `include_answer` | `false` | Generate an AI answer (needs `ANSWER_PROVIDER`, see [Configuration](#configuration)) |
 
 Response:
 
@@ -242,27 +297,122 @@ Response:
 
 ### `POST /extract`
 
-```bash
-curl -X POST http://localhost:8000/extract \
-  -H "Content-Type: application/json" \
-  -d '{"urls": ["https://en.wikipedia.org/wiki/Web_search_engine"]}'
-```
-
 | Field | Default | Description |
 |---|---|---|
 | `urls` | required | Up to 20 URLs |
 | `query` | `null` | If set, each result holds only the page's most relevant passages, in page order, instead of the full text |
 | `chunks_per_source` | `3` | With `query`: passages per page, 1 to 10 |
 
-Returns the text of each page in `results` (as `raw_content`) and per-URL errors in `failed_results`.
+Response:
+
+```json
+{
+  "results": [
+    { "url": "https://en.wikipedia.org/wiki/Vice_President_of_the_United_States", "raw_content": "JD Vance is the 50th and current vice president since January 20, 2025. …" }
+  ],
+  "failed_results": [
+    { "url": "https://example.invalid/page", "error": "ConnectError" }
+  ],
+  "response_time": 1.12
+}
+```
 
 ### `GET /health`
 
 Returns `{"status": "ok"}`.
 
+### Errors
+
+| Status | Meaning |
+|---|---|
+| `401` | The API key is missing or wrong |
+| `422` | The request is invalid, for example an empty query; the body says which field |
+| `502` | No search backend returned results |
+
+## Python client reference
+
+```python
+from openscour import OpenScour
+
+client = OpenScour(
+    api_key="YOUR_API_KEY",                 # or OPENSCOUR_API_KEY
+    base_url="https://search.example.com",  # or OPENSCOUR_BASE_URL; default http://localhost:8000
+    timeout=60,                             # seconds
+)
+
+response = client.search(
+    "AWS re:Invent announcements",
+    search_depth="advanced",        # "basic" (default) or "advanced"
+    topic="news",                   # "general" (default) or "news"
+    max_results=10,                 # 1 to 20
+    time_range="week",              # "day", "week", "month" or "year"
+    include_domains=["aws.amazon.com"],
+    exclude_domains=[],
+    include_raw_content=True,       # full page text in result.raw_content
+    include_answer=False,           # AI answer in response.answer
+)
+for result in response.results:
+    print(result.title, result.url, result.score, result.published_date)
+    print(result.content)
+
+pages = client.extract(
+    ["https://en.wikipedia.org/wiki/Web_search_engine"],
+    query="how search engines rank pages",  # optional
+    chunks_per_source=3,                    # passages per page with a query, 1 to 10
+)
+for page in pages.results:
+    print(page.url, page.raw_content)
+for failed in pages.failed_results:
+    print(failed.url, failed.error)
+```
+
+`extract` also accepts a single URL as a string. Use the client as a context manager (`with OpenScour() as client:`) to close its connections automatically.
+
+For async code, `AsyncOpenScour` has the same methods:
+
+```python
+from openscour import AsyncOpenScour
+
+async with AsyncOpenScour() as client:
+    response = await client.search("When is the midterm election in the USA?")
+```
+
+Errors are typed and all inherit from `OpenScourError`:
+
+| Error | When |
+|---|---|
+| `AuthenticationError` | The API key is missing or wrong |
+| `InvalidRequestError` | The request was rejected, for example an empty query |
+| `NoResultsError` | No search backend returned results |
+| `APIConnectionError` | The server could not be reached |
+
+## How it works
+
+```
+                ┌────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────────┐
+query ────────► │  SearXNG   │──►│  Fetch pages │──►│ Extract text │──►│  Rank passages   │──► results
+                │ meta-search│   │  in parallel │   │ (trafilatura)│   │ BM25 + signals   │
+                └─────┬──────┘   └──────────────┘   └──────────────┘   └────────┬─────────┘
+                      │ no results                                              │ optional
+                      ▼                                                         ▼
+                 DuckDuckGo                                              Claude answer
+```
+
+1. **Search.** SearXNG queries several public search engines and merges their results. If it returns nothing, OpenScour falls back to DuckDuckGo.
+2. **Fetch.** The top pages are downloaded in parallel. A `basic` search answers as soon as enough pages are ready, or after 2 seconds at most; slow pages are represented by their search snippet and keep loading in the background, so a repeat search has them.
+3. **Extract.** [trafilatura](https://github.com/adbar/trafilatura) pulls out the main text, in parallel worker processes. OpenScour then removes reference sections, footnote markers and other page clutter. Pages that yield very little text, such as video pages, also get their search snippet as a passage.
+4. **Rank.** Each page is split into passages and scored with BM25, adjusted by:
+   - **answer shape:** dates for *when*, numbers for *how many* or *how tall*, names for *who*, version numbers for *latest release* questions, with a boost for *current* holders on *who is* questions
+   - **topic coverage:** passages must mention the query's named terms, and lists of headings (tables of contents, menus) rank lower than passages that explain something
+   - **freshness:** *latest*, *new* and *recent* queries prefer this year's content
+   - **page quality:** passages near the top of a page rank higher, and boilerplate ranks lower
+5. **Answer (optional).** Claude reads the top passages and writes a short answer with citations.
+
+Searches and pages are cached in memory for 15 minutes.
+
 ## Configuration
 
-Set environment variables, or copy [`.env.example`](.env.example) to `.env`.
+Set environment variables on the server, or copy [`.env.example`](.env.example) to `.env`.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -277,9 +427,11 @@ Set environment variables, or copy [`.env.example`](.env.example) to `.env`.
 | `EXTRACT_WORKERS` | `4` | Worker processes for text extraction |
 | `CACHE_TTL_SECONDS` | `900` | How long searches and pages stay cached |
 
-## Running without Docker
+Clients (the Python client and the MCP server) read `OPENSCOUR_BASE_URL` and `OPENSCOUR_API_KEY`.
 
-You can run the API directly and keep only SearXNG in Docker:
+### Running the server without Docker
+
+Keep only SearXNG in Docker and run the API with uv:
 
 ```bash
 docker compose up -d searxng
@@ -300,14 +452,14 @@ To install the server into another environment, use the `server` extra: `pip ins
 Before you expose OpenScour beyond your own machine:
 
 - Change `server.secret_key` in [`searxng/settings.yml`](searxng/settings.yml). The checked-in value is a placeholder for local use.
-- Set `API_KEYS` so only your applications can call the API.
+- Set `API_KEYS` so only your applications can call the API, and give each client its key through `OPENSCOUR_API_KEY`.
 - Keep SearXNG on a private network. Only the API needs to be reachable.
 - Run more than one API instance only with a shared cache; the built-in cache lives in each process.
 
 ## Known limitations
 
 - **Upstream engines rate-limit.** SearXNG gets results by querying public search engines, and some (Google, DuckDuckGo) answer heavy or automated traffic with CAPTCHAs or blocks. Cloud IP ranges such as AWS are blocked more often. SearXNG uses whichever engines respond; check the `unresponsive engines` lines in the logs and tune engines in `searxng/settings.yml`.
-- **Ranking is rule-based.** It handles common question types well but can miss when the answer is phrased unusually. Turning on AI answers helps with those cases.
+- **Ranking is rule-based.** It handles common question types well but can miss when the answer is phrased unusually, for example lists of past officeholders for *who is* questions. Turning on AI answers helps with those cases.
 - **JavaScript-heavy pages and PDFs** are not extracted; the search engine's snippet is used instead.
 
 ## Responsible use
@@ -357,7 +509,7 @@ tests/               Unit tests for the client, MCP server and ranker
 scripts/             Manual search and answer-quality check
 ```
 
-## Contributing
+### Contributing
 
 Issues and pull requests are welcome. For ranking changes, include a query that improves and run both `uv run pytest` and `scripts/eval_answers.py`, so improvements for one kind of question don't break another.
 
