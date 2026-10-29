@@ -2,6 +2,8 @@
 
 **Self-hosted web search for LLMs and AI agents. Answer-first passages, no paid search API.**
 
+[![Tests](https://github.com/ivipinmishra/openscour/actions/workflows/tests.yml/badge.svg)](https://github.com/ivipinmishra/openscour/actions/workflows/tests.yml)
+[![Release](https://img.shields.io/github/v/release/ivipinmishra/openscour)](https://github.com/ivipinmishra/openscour/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![Docker](https://img.shields.io/badge/docker-compose-2496ED.svg)](docker-compose.yml)
@@ -27,6 +29,8 @@ print(response.results[0].content)
   - [Option 1: HTTP API (any language)](#option-1-http-api-any-language)
   - [Option 2: Python client](#option-2-python-client)
   - [Option 3: AI agents (MCP)](#option-3-ai-agents-mcp)
+- [Example: answer questions with Claude](#example-answer-questions-with-claude)
+- [Versions and updates](#versions-and-updates)
 - [API reference](#api-reference)
 - [Python client reference](#python-client-reference)
 - [How it works](#how-it-works)
@@ -126,18 +130,18 @@ Every field and the response format are in the [API reference](#api-reference).
 
 ### Option 2: Python client
 
-**Install** it in your project. OpenScour is not on PyPI yet, so install it from GitHub.
+**Install** it in your project. OpenScour is not on PyPI yet, so install it from GitHub. The commands pin release `v0.1.0`; see [Versions and updates](#versions-and-updates) for newer releases.
 
 With [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv add git+https://github.com/ivipinmishra/openscour
+uv add git+https://github.com/ivipinmishra/openscour@v0.1.0
 ```
 
 Or with pip, inside a virtual environment:
 
 ```bash
-pip install git+https://github.com/ivipinmishra/openscour
+pip install git+https://github.com/ivipinmishra/openscour@v0.1.0
 ```
 
 The client only needs `httpx`; none of the server's dependencies are installed.
@@ -183,13 +187,13 @@ If your OpenScour server isn't at `http://localhost:8000`, or it requires a key,
 #### Claude Code
 
 ```bash
-claude mcp add openscour -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour" openscour-mcp
+claude mcp add openscour -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.1.0" openscour-mcp
 ```
 
 With a different server address or a key:
 
 ```bash
-claude mcp add openscour -e OPENSCOUR_BASE_URL=https://search.example.com -e OPENSCOUR_API_KEY=YOUR_API_KEY -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour" openscour-mcp
+claude mcp add openscour -e OPENSCOUR_BASE_URL=https://search.example.com -e OPENSCOUR_API_KEY=YOUR_API_KEY -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.1.0" openscour-mcp
 ```
 
 Restart Claude Code, then ask something like *"What changed in Amazon Bedrock this month?"*.
@@ -204,7 +208,7 @@ Restart Claude Code, then ask something like *"What changed in Amazon Bedrock th
      "mcpServers": {
        "openscour": {
          "command": "uvx",
-         "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour", "openscour-mcp"],
+         "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.1.0", "openscour-mcp"],
          "env": { "OPENSCOUR_BASE_URL": "http://localhost:8000" },
          "disabled": false,
          "autoApprove": ["search", "extract"]
@@ -235,7 +239,7 @@ Add the same command to the client's MCP configuration:
   "mcpServers": {
     "openscour": {
       "command": "uvx",
-      "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour", "openscour-mcp"],
+      "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.1.0", "openscour-mcp"],
       "env": { "OPENSCOUR_BASE_URL": "http://localhost:8000" }
     }
   }
@@ -246,14 +250,58 @@ The file's location depends on the client; see its documentation for "MCP server
 
 #### Updating and troubleshooting
 
-- **Get the latest version.** uv caches the MCP server after the first download. To update, clear the cache, then restart the server in your agent or restart the agent:
-
-  ```bash
-  uv cache clean openscour
-  ```
-
+- **Update to a new release.** Change `v0.1.0` in the configuration to the new version and restart the server in your agent, or restart the agent. See [Versions and updates](#versions-and-updates).
 - **"command not found: uvx".** Desktop apps launched from the Dock may not see your terminal's `PATH`. Use the full path from `which uvx` as `command`, for example `/opt/homebrew/bin/uvx` on Apple Silicon Macs with Homebrew.
 - **"Could not reach OpenScour".** The OpenScour server isn't running or `OPENSCOUR_BASE_URL` is wrong. Start it as in [Step 1](#step-1-start-the-server).
+
+## Example: answer questions with Claude
+
+The most common use of OpenScour is giving an LLM current information. This example searches with OpenScour, then has Claude answer from the passages it found, citing them. The full script is in [`examples/answer_with_claude.py`](examples/answer_with_claude.py).
+
+```bash
+uv add git+https://github.com/ivipinmishra/openscour@v0.1.0 anthropic
+```
+
+```python
+import anthropic
+from openscour import OpenScour
+
+question = "What changed in Amazon Bedrock this month?"
+
+# 1. Search: the most relevant passage from each page.
+search = OpenScour().search(question, max_results=5, search_depth="advanced")
+sources = "\n\n".join(
+    f"[{i}] {r.title}\nURL: {r.url}\n{r.content}" for i, r in enumerate(search.results, start=1)
+)
+
+# 2. Answer: Claude reads only those passages and cites them.
+claude = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY
+response = claude.beta.messages.create(
+    model="claude-opus-5-5",
+    max_tokens=16000,
+    output_config={"effort": "low"},  # enough for summarizing a few passages
+    betas=["server-side-fallback-2026-07-01"],
+    fallbacks="default",  # retry on a fallback model if a safety check declines
+    system="Answer using only the numbered sources. Cite them like [1]. "
+    "If the sources don't contain the answer, say so.",
+    messages=[{"role": "user", "content": f"Sources:\n\n{sources}\n\nQuestion: {question}"}],
+)
+print("".join(block.text for block in response.content if block.type == "text"))
+```
+
+Because the passages are short and answer-first, the prompt stays small (about 7,000 characters for five sources) and Claude can cite exactly where each fact came from. To use Claude through Amazon Bedrock instead, create the client with `anthropic.AnthropicBedrockMantle(aws_region="us-east-1")`, use the model `anthropic.claude-opus-5-5`, and remove the `betas` and `fallbacks` lines, which are a Claude API feature.
+
+## Versions and updates
+
+OpenScour is released as tagged versions on [GitHub Releases](https://github.com/ivipinmishra/openscour/releases); what changed in each is in the [changelog](CHANGELOG.md). The install commands in this README pin a version (`@v0.1.0`), so your setup only changes when you choose.
+
+To update:
+
+- **Python client:** change the version in your install command, e.g. `uv add git+https://github.com/ivipinmishra/openscour@v0.2.0`.
+- **MCP server:** change the version in your agent's configuration and restart the server in the agent.
+- **Server:** in your clone, run `git fetch --tags`, `git checkout v0.2.0` and `docker compose up -d --build`.
+
+To always follow the newest code instead, leave out `@v0.1.0`. The MCP server is then cached after its first download; get newer code by stopping it in your agent, running `uv cache clean openscour`, and starting it again.
 
 ## API reference
 
@@ -445,7 +493,7 @@ uv sync
 uv run openscour-server --port 8000
 ```
 
-To install the server into another environment, use the `server` extra: `pip install "openscour[server] @ git+https://github.com/ivipinmishra/openscour"`.
+To install the server into another environment, use the `server` extra: `pip install "openscour[server] @ git+https://github.com/ivipinmishra/openscour@v0.1.0"`.
 
 ## Deploying
 
