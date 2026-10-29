@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import logging
+import secrets
 import time
 from contextlib import asynccontextmanager
 
@@ -68,7 +69,14 @@ bearer = HTTPBearer(auto_error=False)
 
 def require_api_key(creds: HTTPAuthorizationCredentials | None = Depends(bearer)) -> None:
     keys = settings.api_key_set
-    if keys and (creds is None or creds.credentials not in keys):
+    if not keys:
+        return
+    token = creds.credentials if creds is not None else ""
+    token_digest = hashlib.sha256(token.encode()).digest()
+    matched = False
+    for key in keys:
+        matched |= secrets.compare_digest(token_digest, hashlib.sha256(key.encode()).digest())
+    if creds is None or not matched:
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 

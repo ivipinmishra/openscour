@@ -5,7 +5,7 @@ import httpx
 from openscour.server import fetcher
 from openscour.server.cache import TTLCache
 from openscour.server.fetcher import FetchError, PageFetcher
-from openscour.server.robots import RobotsChecker
+from openscour.server.robots import MAX_ROBOTS_BYTES, RobotsChecker
 
 
 def robots_client(body: str | None, status: int = 200) -> httpx.AsyncClient:
@@ -23,9 +23,38 @@ async def test_robots_rules_are_followed():
     assert not await checker.allowed("https://site.example/no-bots/page")
 
 
-async def test_missing_robots_txt_allows_everything():
-    checker = RobotsChecker(robots_client(None, status=404))
+async def test_missing_robots_txt_allows_everything_and_is_cached():
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(404)
+
+    checker = RobotsChecker(httpx.AsyncClient(transport=httpx.MockTransport(handler)))
     assert await checker.allowed("https://site.example/anything")
+    assert await checker.allowed("https://site.example/another")
+    assert calls == 1
+
+
+async def test_robots_txt_caps_bytes_and_evicts_oldest_origins():
+    calls: list[str] = []
+    # Disallow rule placed after MAX_ROBOTS_BYTES should never be parsed.
+    padding = "# comment\n" * (MAX_ROBOTS_BYTES // 10 + 10)
+    oversized = f"User-agent: *\nDisallow: /secret/\n{padding}Disallow: /after-limit/\n"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.host)
+        return httpx.Response(200, text=oversized)
+
+    checker = RobotsChecker(httpx.AsyncClient(transport=httpx.MockTransport(handler)), max_items=2)
+    assert not await checker.allowed("https://one.example/secret/page")
+    assert await checker.allowed("https://one.example/after-limit/page")
+    await checker.allowed("https://two.example/page")
+    await checker.allowed("https://three.example/page")  # evicts one.example
+    await checker.allowed("https://two.example/page")  # still cached
+    await checker.allowed("https://one.example/page")  # re-fetched after eviction
+    assert calls == ["one.example", "two.example", "three.example", "one.example"]
 
 
 async def test_robots_txt_is_fetched_once_per_site():

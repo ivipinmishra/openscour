@@ -2,6 +2,16 @@
 
 All notable changes to OpenScour are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Security
+- API keys are compared in constant time.
+- robots.txt downloads stop at 512 KB instead of reading the whole response first.
+
+### Reliability and performance
+- The robots.txt cache holds at most 4,096 sites, dropping the least recently used, and also caches sites that have no robots.txt.
+- robots.txt lookups time out after 1 second instead of 2, so a slow site can't use up a basic search's 2-second budget.
+
 ## [0.2.0] - 2026-10-29
 
 Security and reliability hardening (phase 1 of the enterprise roadmap).

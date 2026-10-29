@@ -55,11 +55,13 @@ def test_health(client):
     assert client.get("/health").json() == {"status": "ok"}
 
 
-def test_api_key_required_when_configured(client, monkeypatch):
+def test_api_key_required_when_configured(client, fake_search, monkeypatch):
+    client.app.state.pages = FakePages({"https://wiki.example/vp": VP_PAGE})
     monkeypatch.setattr(main.settings, "api_keys", "key-one, key-two")
     assert client.post("/search", json={"query": "x"}).status_code == 401
     assert client.post("/search", json={"query": "x"}, headers={"Authorization": "Bearer wrong"}).status_code == 401
     assert client.post("/extract", json={"urls": ["https://a.example/"]}).status_code == 401
+    assert client.post("/search", json={"query": "x"}, headers={"Authorization": "Bearer key-two"}).status_code == 200
 
 
 def test_search_ranks_answer_first_and_uses_snippets_for_missing_pages(client, fake_search):
