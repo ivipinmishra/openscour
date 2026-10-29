@@ -133,18 +133,18 @@ Every field and the response format are in the [API reference](#api-reference).
 
 ### Option 2: Python client
 
-**Install** it in your project. OpenScour is not on PyPI yet, so install it from GitHub. The commands pin release `v0.1.0`; see [Versions and updates](#versions-and-updates) for newer releases.
+**Install** it in your project. OpenScour is not on PyPI yet, so install it from GitHub. The commands pin release `v0.2.0`; see [Versions and updates](#versions-and-updates) for newer releases.
 
 With [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv add git+https://github.com/ivipinmishra/openscour@v0.1.0
+uv add git+https://github.com/ivipinmishra/openscour@v0.2.0
 ```
 
 Or with pip, inside a virtual environment:
 
 ```bash
-pip install git+https://github.com/ivipinmishra/openscour@v0.1.0
+pip install git+https://github.com/ivipinmishra/openscour@v0.2.0
 ```
 
 The client only needs `httpx`; none of the server's dependencies are installed.
@@ -190,13 +190,13 @@ If your OpenScour server isn't at `http://localhost:8000`, or it requires a key,
 #### Claude Code
 
 ```bash
-claude mcp add openscour -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.1.0" openscour-mcp
+claude mcp add openscour -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.2.0" openscour-mcp
 ```
 
 With a different server address or a key:
 
 ```bash
-claude mcp add openscour -e OPENSCOUR_BASE_URL=https://search.example.com -e OPENSCOUR_API_KEY=YOUR_API_KEY -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.1.0" openscour-mcp
+claude mcp add openscour -e OPENSCOUR_BASE_URL=https://search.example.com -e OPENSCOUR_API_KEY=YOUR_API_KEY -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.2.0" openscour-mcp
 ```
 
 Restart Claude Code, then ask something like *"What changed in Amazon Bedrock this month?"*.
@@ -211,7 +211,7 @@ Restart Claude Code, then ask something like *"What changed in Amazon Bedrock th
      "mcpServers": {
        "openscour": {
          "command": "uvx",
-         "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.1.0", "openscour-mcp"],
+         "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.2.0", "openscour-mcp"],
          "env": { "OPENSCOUR_BASE_URL": "http://localhost:8000" },
          "disabled": false,
          "autoApprove": ["search", "extract"]
@@ -242,7 +242,7 @@ Add the same command to the client's MCP configuration:
   "mcpServers": {
     "openscour": {
       "command": "uvx",
-      "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.1.0", "openscour-mcp"],
+      "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.2.0", "openscour-mcp"],
       "env": { "OPENSCOUR_BASE_URL": "http://localhost:8000" }
     }
   }
@@ -253,7 +253,7 @@ The file's location depends on the client; see its documentation for "MCP server
 
 #### Updating and troubleshooting
 
-- **Update to a new release.** Change `v0.1.0` in the configuration to the new version and restart the server in your agent, or restart the agent. See [Versions and updates](#versions-and-updates).
+- **Update to a new release.** Change `v0.2.0` in the configuration to the new version and restart the server in your agent, or restart the agent. See [Versions and updates](#versions-and-updates).
 - **"command not found: uvx".** Desktop apps launched from the Dock may not see your terminal's `PATH`. Use the full path from `which uvx` as `command`, for example `/opt/homebrew/bin/uvx` on Apple Silicon Macs with Homebrew.
 - **"Could not reach OpenScour".** The OpenScour server isn't running or `OPENSCOUR_BASE_URL` is wrong. Start it as in [Step 1](#step-1-start-the-server).
 
@@ -262,7 +262,7 @@ The file's location depends on the client; see its documentation for "MCP server
 The most common use of OpenScour is giving an LLM current information. This example searches with OpenScour, then has Claude answer from the passages it found, citing them. The full script is in [`examples/answer_with_claude.py`](examples/answer_with_claude.py).
 
 ```bash
-uv add git+https://github.com/ivipinmishra/openscour@v0.1.0 anthropic
+uv add git+https://github.com/ivipinmishra/openscour@v0.2.0 anthropic
 ```
 
 ```python
@@ -296,7 +296,7 @@ Because the passages are short and answer-first, the prompt stays small (about 7
 
 ## Versions and updates
 
-OpenScour is released as tagged versions on [GitHub Releases](https://github.com/ivipinmishra/openscour/releases); what changed in each is in the [changelog](CHANGELOG.md). The install commands in this README pin a version (`@v0.1.0`), so your setup only changes when you choose.
+OpenScour is released as tagged versions on [GitHub Releases](https://github.com/ivipinmishra/openscour/releases); what changed in each is in the [changelog](CHANGELOG.md). The install commands in this README pin a version (`@v0.2.0`), so your setup only changes when you choose.
 
 To update:
 
@@ -304,7 +304,7 @@ To update:
 - **MCP server:** change the version in your agent's configuration and restart the server in the agent.
 - **Server:** in your clone, run `git fetch --tags`, `git checkout v0.2.0` and `docker compose up -d --build`.
 
-To always follow the newest code instead, leave out `@v0.1.0`. The MCP server is then cached after its first download; get newer code by stopping it in your agent, running `uv cache clean openscour`, and starting it again.
+To always follow the newest code instead, leave out `@v0.2.0`. The MCP server is then cached after its first download; get newer code by stopping it in your agent, running `uv cache clean openscour`, and starting it again.
 
 ## API reference
 
@@ -502,7 +502,7 @@ uv sync
 uv run openscour-server --port 8000
 ```
 
-To install the server into another environment, use the `server` extra: `pip install "openscour[server] @ git+https://github.com/ivipinmishra/openscour@v0.1.0"`.
+To install the server into another environment, use the `server` extra: `pip install "openscour[server] @ git+https://github.com/ivipinmishra/openscour@v0.2.0"`.
 
 ## Security
 

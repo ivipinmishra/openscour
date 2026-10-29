@@ -2,7 +2,7 @@
 
 All notable changes to OpenScour are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.2.0] - 2026-10-29
 
 Security and reliability hardening (phase 1 of the enterprise roadmap).
 
@@ -45,4 +45,5 @@ First release.
 ### MCP server
 - `openscour-mcp` gives AI agents read-only `search` and `extract` tools, with setup instructions for Claude Code, Kiro, Cursor, Claude Desktop and VS Code.
 
+[0.2.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.1.0

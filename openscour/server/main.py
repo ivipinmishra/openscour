@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI):
     shutdown_extractors()
 
 
-app = FastAPI(title="OpenScour", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="OpenScour", version="0.2.0", lifespan=lifespan)
 bearer = HTTPBearer(auto_error=False)
 
 
