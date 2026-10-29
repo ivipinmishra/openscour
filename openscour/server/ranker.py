@@ -34,6 +34,11 @@ INTENTS: list[tuple[re.Pattern, re.Pattern]] = [
         re.compile(rf"\d|\b{_NUMBER_WORD}\b", re.I),
     ),
     (
+        # "latest Python release", "what is the current version of Node.js"
+        re.compile(r"\b(latest|current|newest)\b.*\b(version|release)s?\b", re.I),
+        re.compile(r"\b[vV]?\d+\.\d+(?:\.\d+)?\b"),
+    ),
+    (
         re.compile(r"^\s*who\b", re.I),
         # "Barack Obama", "John F. Kennedy", "JD Vance", "J. D. Vance"
         re.compile(r"\b(?:[A-Z][a-z]+|[A-Z]{1,2}\.?(?: [A-Z]\.)?)(?: [A-Z]\.)? [A-Z][a-z]+\b"),
@@ -44,7 +49,7 @@ INTENTS: list[tuple[re.Pattern, re.Pattern]] = [
 PRESENT_TENSE = re.compile(r"^\s*(who|what) (is|are)\b", re.I)
 # Only explicit cues: "since" and recent years also appear in history ("Since the
 # 1830s…", "Kamala Harris, 2021-2025") and promoted former officeholders.
-CURRENT = re.compile(r"\b(current(ly)?|incumbent)\b", re.I)
+CURRENT = re.compile(r"\b(current(ly)?|incumbent|latest stable)\b", re.I)
 
 # Forms of address that look like "Firstname Lastname" to the name pattern.
 HONORIFICS = frozenset(
@@ -162,6 +167,23 @@ def chunk_multiplier(
             # answer-shaped value they shouldn't outrank a passage that has one.
             m *= 0.6
     return m
+
+
+_LIST_ITEM = re.compile(r"(?:^|\s)(?:[-*•]|\d+\.)\s+")
+
+
+def is_heading_list(chunk: str) -> bool:
+    """A list of short headings, like a table of contents or a navigation menu.
+
+    It matches many query words ("Best practices for RAG chunking") but says
+    nothing; real list content has longer items or full sentences.
+    """
+    items = [i.strip() for i in _LIST_ITEM.split(chunk) if i.strip()]
+    if len(items) < 3:
+        return False
+    avg_words = sum(len(i.split()) for i in items) / len(items)
+    sentences = sum(1 for i in items if i.rstrip("*_ ").endswith((".", "!", "?")))
+    return avg_words <= 9 and sentences / len(items) < 0.3
 
 
 def chunk_text(text: str, target_words: int = CHUNK_WORDS) -> list[str]:
@@ -283,11 +305,12 @@ def rank(query: str, docs: list[Doc], chunks_per_doc: int) -> list[Ranked]:
     if not docs:
         return []
     answer = answer_pattern(query)
-    present = bool(PRESENT_TENSE.search(query))
+    version_question = answer is not None and answer.pattern == INTENTS[2][1].pattern
+    present = bool(PRESENT_TENSE.search(query)) or version_question
     # Factual questions have their own answer-shaped scoring; topic searches
     # ("Latest AWS Bedrock updates") get topic coverage and freshness instead.
     topic_search = answer is None
-    fresh = topic_search and wants_fresh(query)
+    fresh = (topic_search or version_question) and wants_fresh(query)
     topic = set(tokenize(query)) - FRESHNESS_WORDS
     entities = entity_terms(query)
 
@@ -316,6 +339,8 @@ def rank(query: str, docs: list[Doc], chunks_per_doc: int) -> list[Ranked]:
             s *= chunk_multiplier(chunk, ci, qset, titles[di], answer, present)
             if topic_search:
                 s *= topic_multiplier(set(corpus[i]), topic, entities)
+                if is_heading_list(chunk):
+                    s *= 0.4
             if fresh:
                 s *= recency_multiplier(chunk)
         per_doc.setdefault(di, []).append((s, ci))

@@ -132,11 +132,11 @@ query ────────► │  SearXNG   │──►│  Fetch pages �
 ```
 
 1. **Search.** SearXNG queries several public search engines and merges their results. If it returns nothing, OpenScour falls back to DuckDuckGo.
-2. **Fetch.** The top pages are downloaded in parallel, with timeouts and size limits.
-3. **Extract.** [trafilatura](https://github.com/adbar/trafilatura) pulls out the main text. OpenScour then removes reference sections, footnote markers and other page clutter.
+2. **Fetch.** The top pages are downloaded in parallel. A `basic` search answers as soon as enough pages are ready, or after 2 seconds at most; slow pages are represented by their search snippet and keep loading in the background, so a repeat search has them.
+3. **Extract.** [trafilatura](https://github.com/adbar/trafilatura) pulls out the main text, in parallel worker processes. OpenScour then removes reference sections, footnote markers and other page clutter. Pages that yield very little text, such as video pages, also get their search snippet as a passage.
 4. **Rank.** Each page is split into passages and scored with BM25, adjusted by:
-   - **answer shape:** dates for *when*, numbers for *how many* or *how tall*, names for *who*, with a boost for *current* holders on *who is* questions
-   - **topic coverage:** passages must mention the query's named terms
+   - **answer shape:** dates for *when*, numbers for *how many* or *how tall*, names for *who*, version numbers for *latest release* questions, with a boost for *current* holders on *who is* questions
+   - **topic coverage:** passages must mention the query's named terms, and lists of headings (tables of contents, menus) rank lower than passages that explain something
    - **freshness:** *latest*, *new* and *recent* queries prefer this year's content
    - **page quality:** passages near the top of a page rank higher, and boilerplate ranks lower
 5. **Answer (optional).** Claude reads the top passages and writes a short answer with citations.
@@ -259,6 +259,8 @@ Set environment variables, or copy [`.env.example`](.env.example) to `.env`.
 | `ANSWER_MODEL` | `claude-opus-5-5` | Model used for AI answers |
 | `AWS_REGION` | `us-east-1` | Region for Amazon Bedrock |
 | `FETCH_TIMEOUT` | `8` | Page fetch timeout in seconds for `advanced` searches |
+| `BASIC_FETCH_DEADLINE` | `2.0` | Longest a `basic` search waits for pages, in seconds |
+| `EXTRACT_WORKERS` | `4` | Worker processes for text extraction |
 | `CACHE_TTL_SECONDS` | `900` | How long searches and pages stay cached |
 
 ## Running without Docker

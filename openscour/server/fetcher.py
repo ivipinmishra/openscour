@@ -1,7 +1,9 @@
 import asyncio
 import logging
+import multiprocessing
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 
 import httpx
 import trafilatura
@@ -12,10 +14,34 @@ log = logging.getLogger(__name__)
 
 _TEXT_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
 
-# trafilatura/lxml is not safe to run in parallel threads: concurrent element
-# copies corrupt libxml2's shared dictionary and abort the process. Extraction
-# is CPU-bound under the GIL anyway, so one dedicated thread costs little.
-_extract_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="extract")
+# Extraction runs in worker processes: trafilatura/lxml is not safe in parallel
+# threads (concurrent element copies corrupt libxml2's shared dictionary and abort
+# the process), and processes also extract several pages truly in parallel.
+_pool: ProcessPoolExecutor | None = None
+
+
+def _extract_pool() -> ProcessPoolExecutor:
+    global _pool
+    if _pool is None:
+        _pool = ProcessPoolExecutor(
+            max_workers=settings.extract_workers,
+            # "spawn" everywhere: forking a process that has running threads is unsafe.
+            mp_context=multiprocessing.get_context("spawn"),
+        )
+    return _pool
+
+
+def warm_up_extractors() -> None:
+    """Start the worker processes now, so the first search doesn't pay for it."""
+    pool = _extract_pool()
+    list(pool.map(_extract, ["<p>warm up</p>"] * settings.extract_workers, ["text/html"] * settings.extract_workers))
+
+
+def shutdown_extractors() -> None:
+    global _pool
+    if _pool is not None:
+        _pool.shutdown(wait=False, cancel_futures=True)
+        _pool = None
 
 
 class FetchError(Exception):
@@ -78,23 +104,43 @@ async def fetch_page(client: httpx.AsyncClient, url: str, timeout: float) -> str
         html, ctype = await asyncio.wait_for(_download(client, url, timeout), timeout + 1)
     except (httpx.HTTPError, asyncio.TimeoutError) as e:
         raise FetchError(type(e).__name__) from e
-    text = await asyncio.get_running_loop().run_in_executor(_extract_pool, _extract, html, ctype)
+    try:
+        text = await asyncio.get_running_loop().run_in_executor(_extract_pool(), _extract, html, ctype)
+    except BrokenProcessPool as e:
+        # A worker died (e.g. a pathological page); start fresh workers next time.
+        shutdown_extractors()
+        raise FetchError("extraction worker crashed") from e
     if not text:
         raise FetchError("no extractable content")
     return text
 
 
+def start_fetches(client: httpx.AsyncClient, urls: list[str], timeout: float) -> dict[str, asyncio.Task[str]]:
+    """Start fetching every URL; each task returns page text or raises FetchError."""
+    sem = asyncio.Semaphore(settings.fetch_concurrency)
+
+    async def one(url: str) -> str:
+        async with sem:
+            return await fetch_page(client, url, timeout)
+
+    return {u: asyncio.create_task(one(u)) for u in urls}
+
+
+def task_result(task: asyncio.Task[str]) -> str | FetchError:
+    """The finished task's page text, or the reason it has none."""
+    if task.cancelled():
+        return FetchError("cancelled")
+    exc = task.exception()
+    if exc is None:
+        return task.result()
+    log.debug("fetch failed: %s", exc)
+    return exc if isinstance(exc, FetchError) else FetchError(type(exc).__name__)
+
+
 async def fetch_many(
     client: httpx.AsyncClient, urls: list[str], timeout: float
 ) -> dict[str, str | FetchError]:
-    sem = asyncio.Semaphore(settings.fetch_concurrency)
-
-    async def one(url: str) -> tuple[str, str | FetchError]:
-        async with sem:
-            try:
-                return url, await fetch_page(client, url, timeout)
-            except FetchError as e:
-                log.debug("fetch failed %s: %s", url, e)
-                return url, e
-
-    return dict(await asyncio.gather(*(one(u) for u in urls)))
+    tasks = start_fetches(client, urls, timeout)
+    if tasks:
+        await asyncio.wait(tasks.values())
+    return {u: task_result(t) for u, t in tasks.items()}

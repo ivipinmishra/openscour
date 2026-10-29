@@ -21,6 +21,10 @@ class Settings(BaseSettings):
 
     fetch_timeout: float = 8.0
     fetch_concurrency: int = 10
+    extract_workers: int = 4
+    # Basic searches answer after this many seconds and use search snippets for
+    # pages that aren't ready; those pages keep loading in the background for the cache.
+    basic_fetch_deadline: float = 2.0
     max_page_bytes: int = 3_000_000
     cache_ttl_seconds: int = 900
     user_agent: str = (

@@ -16,7 +16,7 @@ CASES = [
     ("When is the mid term election in USA?", r"Nov(ember|\.)? 3\b"),
     ("When was Python first released?", r"1991"),
     ("When did the Berlin Wall fall?", r"1989"),
-    ("How tall is the Eiffel Tower?", r"3[0-3]\d(\.\d+)? ?(m|metres|meters)"),
+    ("How tall is the Eiffel Tower?", r"3[0-3]\d(\.\d+)? ?(m|metres|meters)\b|\b(9[89]\d|1,0[0-9]{2}) ?(ft|feet)"),
     ("How many moons does Mars have?", r"\b(two|2)\b.{0,40}moons|moons.{0,40}\b(two|2)\b|Phobos"),
     ("Who founded SpaceX?", r"Musk"),
     ("What is the capital of Australia?", r"Canberra"),

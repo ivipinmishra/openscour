@@ -186,3 +186,37 @@ def test_filter_dedupes_and_applies_domains():
     assert [r.url for r in out] == ["https://www.docs.python.org/3/"]
     out = filter_results(results, include_domains=[], exclude_domains=["example.com"])
     assert len(out) == 1
+
+
+def test_table_of_contents_is_demoted_for_topic_searches():
+    from openscour.server.ranker import is_heading_list
+
+    toc = (
+        "- Advice for choosing a chunking strategy - Best practices for RAG chunking "
+        "- Evaluating chunking performance - Common pitfalls in document chunking - Current trends in RAG chunking"
+    )
+    advice = (
+        "Best practices for RAG chunking: split along natural boundaries such as paragraphs, "
+        "and to add 10-20% overlap between chunks so a key sentence is never cut in half."
+    )
+    assert is_heading_list(toc)
+    assert not is_heading_list(advice)
+    assert not is_heading_list("- Oct. 9: Voter registration deadline. - Oct. 15: Early voting begins. - Nov. 3: Election day.")
+    docs = [
+        Doc(url="https://toc.example", title="RAG chunking strategies", text=toc, rank=0),
+        Doc(url="https://advice.example", title="RAG chunking strategies", text=advice, rank=1),
+    ]
+    assert rank("best practices for RAG chunking", docs, chunks_per_doc=1)[0].doc.url == "https://advice.example"
+
+
+def test_latest_release_question_prefers_current_version_sentence():
+    assert answer_pattern("latest Python release").search("Python 3.15 is out")
+    assert answer_pattern("What is the current version of Node.js?").search("v24.1.0")
+    old = f"The latest major version, Python 3.14, was released on October 7, {_THIS_YEAR - 1}."
+    new = f"As of October {_THIS_YEAR}, Python 3.15 is the latest stable release."
+    docs = [
+        Doc(url="https://old.example", title="Latest Python version", text=old, rank=0),
+        Doc(url="https://new.example", title="History of Python", text=new, rank=1),
+    ]
+    top = rank("latest Python release", docs, chunks_per_doc=1)[0]
+    assert top.doc.url == "https://new.example"
