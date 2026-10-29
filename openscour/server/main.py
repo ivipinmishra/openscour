@@ -12,13 +12,7 @@ from openscour.server import providers
 from openscour.server.answer import generate_answer
 from openscour.server.cache import TTLCache
 from openscour.server.config import settings
-from openscour.server.fetcher import (
-    FetchError,
-    shutdown_extractors,
-    start_fetches,
-    task_result,
-    warm_up_extractors,
-)
+from openscour.server.fetcher import PageFetcher, shutdown_extractors, warm_up_extractors
 from openscour.server.models import (
     ExtractRequest,
     ExtractResponse,
@@ -28,7 +22,9 @@ from openscour.server.models import (
     SearchResponse,
     SearchResult,
 )
+from openscour.server.netguard import guarded_transport
 from openscour.server.ranker import Doc, rank, relevant_passages
+from openscour.server.robots import RobotsChecker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -48,12 +44,20 @@ page_cache = TTLCache(settings.cache_ttl_seconds, max_items=4096)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.http = httpx.AsyncClient(
-        headers={"User-Agent": settings.user_agent, "Accept-Language": "en-US,en;q=0.9"},
-        limits=httpx.Limits(max_connections=50),
-    )
+    headers = {"User-Agent": settings.user_agent, "Accept-Language": "en-US,en;q=0.9"}
+    # SearXNG runs on the private network next to OpenScour, so this client may
+    # reach private addresses. It only ever talks to SEARXNG_URL.
+    app.state.http = httpx.AsyncClient(headers=headers, limits=httpx.Limits(max_connections=20))
+    # Pages come from untrusted URLs: this client can only connect to public
+    # addresses, on every redirect hop. trust_env=False so proxy variables can't
+    # route around that check.
+    transport = None if settings.allow_private_network_fetches else guarded_transport(max_connections=50)
+    app.state.page_http = httpx.AsyncClient(headers=headers, transport=transport, trust_env=False)
+    robots = RobotsChecker(app.state.page_http) if settings.respect_robots_txt else None
+    app.state.pages = PageFetcher(app.state.page_http, page_cache, robots)
     await asyncio.to_thread(warm_up_extractors)
     yield
+    await app.state.page_http.aclose()
     await app.state.http.aclose()
     shutdown_extractors()
 
@@ -68,68 +72,6 @@ def require_api_key(creds: HTTPAuthorizationCredentials | None = Depends(bearer)
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
-# Fetches that outlived their request's deadline; kept referenced so they finish and fill the cache.
-_background: set[asyncio.Task[str]] = set()
-
-
-def _cache_when_done(url: str, task: asyncio.Task[str]) -> None:
-    _background.discard(task)
-    if isinstance(result := task_result(task), str):
-        page_cache.set(url, result)
-
-
-async def _wait_for_enough(tasks: list[asyncio.Task[str]], enough: int, deadline: float) -> None:
-    """Wait until `enough` tasks have produced page text, all tasks are done, or the deadline passes."""
-    loop = asyncio.get_running_loop()
-    end = loop.time() + deadline
-    pending = set(tasks)
-    while pending:
-        if sum(1 for t in tasks if t.done() and isinstance(task_result(t), str)) >= enough:
-            return
-        remaining = end - loop.time()
-        if remaining <= 0:
-            return
-        _, pending = await asyncio.wait(pending, timeout=remaining, return_when=asyncio.FIRST_COMPLETED)
-
-
-async def fetch_cached(
-    client: httpx.AsyncClient,
-    urls: list[str],
-    timeout: float,
-    deadline: float | None = None,
-    enough: int | None = None,
-) -> dict[str, str | FetchError]:
-    """Fetch pages, using the cache.
-
-    With a deadline, return once `enough` pages (counting cached ones) are ready,
-    or when the deadline passes. Pages not ready by then come back as FetchError
-    and keep loading in the background, so a repeat search has them.
-    """
-    out: dict[str, str | FetchError] = {}
-    missing = []
-    for u in urls:
-        if (hit := page_cache.get(u)) is not None:
-            out[u] = hit
-        else:
-            missing.append(u)
-    tasks = start_fetches(client, missing, timeout)
-    if tasks and deadline is None:
-        await asyncio.wait(tasks.values())
-    elif tasks:
-        still_needed = (enough or len(urls)) - len(out)
-        await _wait_for_enough(list(tasks.values()), still_needed, deadline)
-    for u, t in tasks.items():
-        if t.done():
-            out[u] = task_result(t)
-            if isinstance(out[u], str):
-                page_cache.set(u, out[u])
-        else:
-            out[u] = FetchError("not ready before the deadline")
-            _background.add(t)
-            t.add_done_callback(lambda task, url=u: _cache_when_done(url, task))
-    return out
-
-
 @app.get("/health")
 async def health():
     return {"status": "ok"}
@@ -138,7 +80,11 @@ async def health():
 @app.post("/search", response_model=SearchResponse, dependencies=[Depends(require_api_key)])
 async def search(req: SearchRequest, request: Request) -> SearchResponse:
     start = time.perf_counter()
-    cache_key = hashlib.sha256(req.model_dump_json().encode()).hexdigest()
+    # Domain lists in a different order are the same search.
+    normalized = req.model_copy(
+        update={"include_domains": sorted(req.include_domains), "exclude_domains": sorted(req.exclude_domains)}
+    )
+    cache_key = hashlib.sha256(normalized.model_dump_json().encode()).hexdigest()
     if (hit := search_cache.get(cache_key)) is not None:
         return hit.model_copy(update={"response_time": round(time.perf_counter() - start, 3)})
 
@@ -158,7 +104,7 @@ async def search(req: SearchRequest, request: Request) -> SearchResponse:
     if not raw:
         raise HTTPException(status_code=502, detail="No results from search backends")
 
-    pages = await fetch_cached(client, [r.url for r in raw], timeout, deadline, enough=req.max_results)
+    pages = await request.app.state.pages.fetch([r.url for r in raw], timeout, deadline, enough=req.max_results)
 
     # Pages that could not be fetched still count, using the engine's snippet.
     docs = []
@@ -175,7 +121,8 @@ async def search(req: SearchRequest, request: Request) -> SearchResponse:
         docs.append(Doc(url=r.url, title=r.title, text=text, rank=i, published=r.published_date))
         meta[r.url] = (r, page if isinstance(page, str) else None)
 
-    ranked = rank(req.query, docs, chunks_per_doc)[: req.max_results]
+    # Ranking is CPU work; keep the event loop free for other requests.
+    ranked = (await asyncio.to_thread(rank, req.query, docs, chunks_per_doc))[: req.max_results]
 
     results = [
         SearchResult(
@@ -204,7 +151,7 @@ async def search(req: SearchRequest, request: Request) -> SearchResponse:
 async def extract(req: ExtractRequest, request: Request) -> ExtractResponse:
     start = time.perf_counter()
     urls = list(dict.fromkeys(str(u) for u in req.urls))
-    pages = await fetch_cached(request.app.state.http, urls, settings.fetch_timeout)
+    pages = await request.app.state.pages.fetch(urls, settings.fetch_timeout)
     if req.query:
         # Ranking is CPU work; keep it off the event loop.
         pages = {

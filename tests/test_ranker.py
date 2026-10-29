@@ -1,7 +1,8 @@
 from openscour.server.fetcher import strip_back_matter
 from openscour.server.providers import RawResult, filter_results
+from datetime import date
+
 from openscour.server.ranker import (
-    _THIS_YEAR,
     Doc,
     answer_pattern,
     chunk_text,
@@ -28,8 +29,8 @@ def test_topic_search_requires_named_topic():
 
 
 def test_latest_prefers_recent_pages():
-    old = f"Python release notes. Python 3.9 was released in {_THIS_YEAR - 6} with new features."
-    new = f"Python release notes. Python 3.15 was released in October {_THIS_YEAR} with new features."
+    old = f"Python release notes. Python 3.9 was released in {date.today().year - 6} with new features."
+    new = f"Python release notes. Python 3.15 was released in October {date.today().year} with new features."
     docs = [
         Doc(url="https://old.example", title="Python release", text=old, rank=0),
         Doc(url="https://new.example", title="Python release", text=new, rank=1),
@@ -38,9 +39,9 @@ def test_latest_prefers_recent_pages():
 
 
 def test_recency_and_entities():
-    assert recency_multiplier(f"updated {_THIS_YEAR}") > recency_multiplier(f"updated {_THIS_YEAR - 5}")
+    assert recency_multiplier(f"updated {date.today().year}") > recency_multiplier(f"updated {date.today().year - 5}")
     # Years after this one are roadmaps, not news.
-    assert recency_multiplier(f"goals for {_THIS_YEAR + 4}") == 1.0
+    assert recency_multiplier(f"goals for {date.today().year + 4}") == 1.0
     assert entity_terms("Latest AWS Bedrock updates") == {"aws", "bedrock"}
     assert entity_terms("latest aws bedrock updates") == set()
 
@@ -212,8 +213,8 @@ def test_table_of_contents_is_demoted_for_topic_searches():
 def test_latest_release_question_prefers_current_version_sentence():
     assert answer_pattern("latest Python release").search("Python 3.15 is out")
     assert answer_pattern("What is the current version of Node.js?").search("v24.1.0")
-    old = f"The latest major version, Python 3.14, was released on October 7, {_THIS_YEAR - 1}."
-    new = f"As of October {_THIS_YEAR}, Python 3.15 is the latest stable release."
+    old = f"The latest major version, Python 3.14, was released on October 7, {date.today().year - 1}."
+    new = f"As of October {date.today().year}, Python 3.15 is the latest stable release."
     docs = [
         Doc(url="https://old.example", title="Latest Python version", text=old, rank=0),
         Doc(url="https://new.example", title="History of Python", text=new, rank=1),

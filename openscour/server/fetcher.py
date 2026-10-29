@@ -8,7 +8,9 @@ from concurrent.futures.process import BrokenProcessPool
 import httpx
 import trafilatura
 
+from openscour.server.cache import TTLCache
 from openscour.server.config import settings
+from openscour.server.robots import RobotsChecker
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +29,7 @@ def _extract_pool() -> ProcessPoolExecutor:
             max_workers=settings.extract_workers,
             # "spawn" everywhere: forking a process that has running threads is unsafe.
             mp_context=multiprocessing.get_context("spawn"),
+            max_tasks_per_child=settings.extract_max_tasks_per_child,
         )
     return _pool
 
@@ -103,7 +106,9 @@ async def fetch_page(client: httpx.AsyncClient, url: str, timeout: float) -> str
     try:
         html, ctype = await asyncio.wait_for(_download(client, url, timeout), timeout + 1)
     except (httpx.HTTPError, asyncio.TimeoutError) as e:
-        raise FetchError(type(e).__name__) from e
+        # Keep the reason for blocked addresses; for other errors the type is enough.
+        reason = str(e) if str(e).startswith("blocked:") else type(e).__name__
+        raise FetchError(reason) from e
     try:
         text = await asyncio.get_running_loop().run_in_executor(_extract_pool(), _extract, html, ctype)
     except BrokenProcessPool as e:
@@ -113,17 +118,6 @@ async def fetch_page(client: httpx.AsyncClient, url: str, timeout: float) -> str
     if not text:
         raise FetchError("no extractable content")
     return text
-
-
-def start_fetches(client: httpx.AsyncClient, urls: list[str], timeout: float) -> dict[str, asyncio.Task[str]]:
-    """Start fetching every URL; each task returns page text or raises FetchError."""
-    sem = asyncio.Semaphore(settings.fetch_concurrency)
-
-    async def one(url: str) -> str:
-        async with sem:
-            return await fetch_page(client, url, timeout)
-
-    return {u: asyncio.create_task(one(u)) for u in urls}
 
 
 def task_result(task: asyncio.Task[str]) -> str | FetchError:
@@ -137,10 +131,92 @@ def task_result(task: asyncio.Task[str]) -> str | FetchError:
     return exc if isinstance(exc, FetchError) else FetchError(type(exc).__name__)
 
 
-async def fetch_many(
-    client: httpx.AsyncClient, urls: list[str], timeout: float
-) -> dict[str, str | FetchError]:
-    tasks = start_fetches(client, urls, timeout)
-    if tasks:
-        await asyncio.wait(tasks.values())
-    return {u: task_result(t) for u, t in tasks.items()}
+class PageFetcher:
+    """Fetches pages for the whole server.
+
+    - One download limit (fetch_concurrency) shared by all requests, rather than
+      one per request, so concurrent searches can't multiply the load.
+    - Requests for a URL that is already being fetched wait for that fetch
+      instead of starting another (request coalescing).
+    - Pages are cached; fetches that outlive a request's deadline finish in the
+      background and fill the cache, up to max_inflight_fetches at a time.
+    - robots.txt is checked before downloading, when enabled.
+    """
+
+    def __init__(self, client: httpx.AsyncClient, cache: TTLCache, robots: RobotsChecker | None = None) -> None:
+        self._client = client
+        self._cache = cache
+        self._robots = robots
+        self._downloads = asyncio.Semaphore(settings.fetch_concurrency)
+        self._inflight: dict[str, asyncio.Task[str]] = {}
+
+    @property
+    def inflight(self) -> int:
+        return len(self._inflight)
+
+    def _start(self, url: str, timeout: float) -> asyncio.Task[str] | None:
+        if (task := self._inflight.get(url)) is not None:
+            return task
+        if len(self._inflight) >= settings.max_inflight_fetches:
+            return None
+        task = asyncio.create_task(self._fetch(url, timeout))
+        self._inflight[url] = task
+        task.add_done_callback(lambda t, url=url: self._finished(url, t))
+        return task
+
+    def _finished(self, url: str, task: asyncio.Task[str]) -> None:
+        if self._inflight.get(url) is task:
+            del self._inflight[url]
+        if isinstance(result := task_result(task), str):
+            self._cache.set(url, result)
+
+    async def _fetch(self, url: str, timeout: float) -> str:
+        if self._robots is not None and not await self._robots.allowed(url):
+            raise FetchError("disallowed by robots.txt")
+        async with self._downloads:
+            return await fetch_page(self._client, url, timeout)
+
+    async def fetch(
+        self,
+        urls: list[str],
+        timeout: float,
+        deadline: float | None = None,
+        enough: int | None = None,
+    ) -> dict[str, str | FetchError]:
+        """Fetch pages, using the cache.
+
+        Without a deadline, wait for every page. With one, return once `enough`
+        pages (counting cached ones) are ready, or when the deadline passes;
+        pages not ready by then come back as FetchError and keep loading in
+        the background, so a repeat request has them.
+        """
+        out: dict[str, str | FetchError] = {}
+        tasks: dict[str, asyncio.Task[str]] = {}
+        for url in urls:
+            if (hit := self._cache.get(url)) is not None:
+                out[url] = hit
+            elif (task := self._start(url, timeout)) is not None:
+                tasks[url] = task
+            else:
+                out[url] = FetchError("server busy")
+        if tasks and deadline is None:
+            await asyncio.wait(tasks.values())
+        elif tasks:
+            await _wait_for_enough(list(tasks.values()), (enough or len(urls)) - len(out), deadline)
+        for url, task in tasks.items():
+            out[url] = task_result(task) if task.done() else FetchError("not ready before the deadline")
+        return out
+
+
+async def _wait_for_enough(tasks: list[asyncio.Task[str]], enough: int, deadline: float) -> None:
+    """Wait until `enough` tasks have produced page text, all tasks are done, or the deadline passes."""
+    loop = asyncio.get_running_loop()
+    end = loop.time() + deadline
+    pending = set(tasks)
+    while pending:
+        if sum(1 for t in tasks if t.done() and isinstance(task_result(t), str)) >= enough:
+            return
+        remaining = end - loop.time()
+        if remaining <= 0:
+            return
+        _, pending = await asyncio.wait(pending, timeout=remaining, return_when=asyncio.FIRST_COMPLETED)

@@ -2,11 +2,16 @@
 
 import math
 import re
+import unicodedata
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
 
-_WORD = re.compile(r"[a-z0-9]+(?:'[a-z]+)?")
+# Letters and digits in any script ("café", "москва", "東京"), with an optional apostrophe part.
+_WORD = re.compile(r"[^\W_]+(?:'[^\W_]+)?")
+# Chinese, Japanese and Korean are written without spaces between words, so a
+# "word" match is a whole phrase; those runs are indexed as overlapping character pairs.
+_CJK_RUN = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]+")
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 STOPWORDS = frozenset(
@@ -66,8 +71,27 @@ BOILERPLATE = re.compile(
 )
 
 
+def _words(text: str) -> list[str]:
+    """Normalised words of any language; CJK runs become overlapping character pairs."""
+    out: list[str] = []
+    for word in _WORD.findall(unicodedata.normalize("NFKC", text).casefold()):
+        if not _CJK_RUN.search(word):
+            out.append(word)
+            continue
+        pos = 0
+        for run in _CJK_RUN.finditer(word):
+            if run.start() > pos:
+                out.append(word[pos : run.start()])
+            chars = run.group(0)
+            out.extend([chars] if len(chars) == 1 else [chars[i : i + 2] for i in range(len(chars) - 1)])
+            pos = run.end()
+        if pos < len(word):
+            out.append(word[pos:])
+    return out
+
+
 def tokenize(text: str) -> list[str]:
-    return [t for t in _WORD.findall(text.lower()) if t not in STOPWORDS]
+    return [t for t in _words(text) if t not in STOPWORDS]
 
 
 def query_terms(query: str, vocabulary: set[str] | None = None) -> list[str]:
@@ -102,7 +126,7 @@ def answer_strength(answer: re.Pattern, sentence: str, query: set[str]) -> int:
     """
     best = 0
     for m in answer.finditer(sentence):
-        words = set(_WORD.findall(m.group(0).lower()))
+        words = set(_words(m.group(0)))
         if words - query - HONORIFICS - STOPWORDS:
             best = max(best, 1 if _BARE_YEAR.fullmatch(m.group(0)) else 2)
     return best
@@ -240,11 +264,15 @@ class BM25:
 # Words that ask for recency rather than name the topic.
 FRESHNESS_WORDS = frozenset("latest newest recent recently new current news update updates today".split())
 _YEAR = re.compile(r"\b(?:19[5-9]\d|20\d{2})\b")
-_THIS_YEAR = date.today().year
+
+
+def this_year() -> int:
+    # Computed per call: a server running across New Year must not keep last year.
+    return date.today().year
 
 
 def wants_fresh(query: str) -> bool:
-    return bool(set(_WORD.findall(query.lower())) & FRESHNESS_WORDS)
+    return bool(set(_words(query)) & FRESHNESS_WORDS)
 
 
 def entity_terms(query: str) -> set[str]:
@@ -261,13 +289,14 @@ def entity_terms(query: str) -> set[str]:
 
 def recency_multiplier(text: str, published: str | None = None) -> float:
     """Favour text dated this year; years after this one are plans, not news."""
-    years = [int(y) for y in _YEAR.findall(f"{text} {published or ''}") if int(y) <= _THIS_YEAR]
+    current = this_year()
+    years = [int(y) for y in _YEAR.findall(f"{text} {published or ''}") if int(y) <= current]
     if not years:
         return 1.0
     newest = max(years)
-    if newest == _THIS_YEAR:
+    if newest == current:
         return 1.3
-    if newest == _THIS_YEAR - 1:
+    if newest == current - 1:
         return 1.1
     return 0.8
 

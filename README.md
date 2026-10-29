@@ -35,6 +35,7 @@ print(response.results[0].content)
 - [Python client reference](#python-client-reference)
 - [How it works](#how-it-works)
 - [Configuration](#configuration)
+- [Security](#security)
 - [Deploying](#deploying)
 - [Known limitations](#known-limitations)
 - [Development](#development)
@@ -47,6 +48,8 @@ print(response.results[0].content)
 - **Clean text extraction.** Navigation, cookie banners, reference lists and footnote markers are removed. Given a query, extraction returns only the passages that matter, often 95% shorter than the page.
 - **Three ways in.** A plain HTTP API for any language, a typed Python client, and an MCP server for AI agents such as Claude Code, Kiro and Cursor.
 - **Optional AI answers.** Claude can write a short cited answer from the top passages, through Amazon Bedrock or the Claude API.
+- **Many languages.** Search and ranking work with accented, Cyrillic, Chinese, Japanese and Korean text, not only English.
+- **Secure by default.** Protection against server-side request forgery, robots.txt respected, an unprivileged read-only container, and ports bound to this machine until you choose otherwise. See [Security](#security).
 - **Runs anywhere Docker runs**, from a laptop to AWS.
 
 ## Step 1: Start the server
@@ -73,7 +76,7 @@ curl http://localhost:8000/health
 
 It should print `{"status":"ok"}`. Interactive API docs are at http://localhost:8000/docs.
 
-To stop it, run `docker compose down` in the same folder. To run it on a server for others, see [Deploying](#deploying).
+Both ports are bound to this machine only (`127.0.0.1`). To stop it, run `docker compose down` in the same folder. To run it on a server for others, see [Deploying](#deploying).
 
 ## Step 2: Choose how to use it
 
@@ -473,7 +476,13 @@ Set environment variables on the server, or copy [`.env.example`](.env.example) 
 | `FETCH_TIMEOUT` | `8` | Page fetch timeout in seconds for `advanced` searches |
 | `BASIC_FETCH_DEADLINE` | `2.0` | Longest a `basic` search waits for pages, in seconds |
 | `EXTRACT_WORKERS` | `4` | Worker processes for text extraction |
+| `EXTRACT_MAX_TASKS_PER_CHILD` | `500` | Pages a worker extracts before it is replaced, to keep memory flat |
+| `FETCH_CONCURRENCY` | `10` | Page downloads at once, across all requests |
+| `MAX_INFLIGHT_FETCHES` | `200` | Fetches queued or running at once; beyond this, searches use snippets |
 | `CACHE_TTL_SECONDS` | `900` | How long searches and pages stay cached |
+| `USER_AGENT` | `OpenScour/0.2 (+repository URL)` | How OpenScour identifies itself to websites |
+| `RESPECT_ROBOTS_TXT` | `true` | Skip pages a site's robots.txt disallows |
+| `ALLOW_PRIVATE_NETWORK_FETCHES` | `false` | Allow fetching pages from private addresses. See [Security](#security) before enabling |
 
 Clients (the Python client and the MCP server) read `OPENSCOUR_BASE_URL` and `OPENSCOUR_API_KEY`.
 
@@ -495,13 +504,21 @@ uv run openscour-server --port 8000
 
 To install the server into another environment, use the `server` extra: `pip install "openscour[server] @ git+https://github.com/ivipinmishra/openscour@v0.1.0"`.
 
+## Security
+
+- **Server-side request forgery (SSRF) protection.** Pages are only fetched from public internet addresses. The check runs on the IP address actually being connected to, on every redirect, so URLs such as `http://169.254.169.254/` (cloud instance credentials), `http://localhost`, private network ranges, and public hostnames that resolve to private addresses are all refused with a `blocked:` error. Proxy environment variables are ignored for page fetches so they can't bypass the check.
+  - `ALLOW_PRIVATE_NETWORK_FETCHES=true` turns this off, for example to search an intranet. Only do that on a deployment that untrusted callers, including AI agents reading untrusted pages, cannot reach.
+- **Honest identity and robots.txt.** OpenScour identifies itself as `OpenScour/0.2` with a link to this repository, and skips pages a site's robots.txt disallows (the `OpenScour` user-agent token, or `*`).
+- **Container hardening.** The API image runs as an unprivileged user with a read-only filesystem, no Linux capabilities and `no-new-privileges`, and has a health check. The SearXNG image is pinned to a specific release.
+- **Local by default.** Docker Compose publishes both ports on `127.0.0.1` only, so nothing is reachable from other machines until you choose to expose it.
+
 ## Deploying
 
 Before you expose OpenScour beyond your own machine:
 
 - Change `server.secret_key` in [`searxng/settings.yml`](searxng/settings.yml). The checked-in value is a placeholder for local use.
 - Set `API_KEYS` so only your applications can call the API, and give each client its key through `OPENSCOUR_API_KEY`.
-- Keep SearXNG on a private network. Only the API needs to be reachable.
+- Publish only the API: in `docker-compose.yml`, change `"127.0.0.1:8000:8000"` to `"8000:8000"`, ideally behind HTTPS. Keep SearXNG's port local or remove it.
 - Run more than one API instance only with a shared cache; the built-in cache lives in each process.
 
 ## Known limitations
@@ -509,10 +526,11 @@ Before you expose OpenScour beyond your own machine:
 - **Upstream engines rate-limit.** SearXNG gets results by querying public search engines, and some (Google, DuckDuckGo) answer heavy or automated traffic with CAPTCHAs or blocks. Cloud IP ranges such as AWS are blocked more often. SearXNG uses whichever engines respond; check the `unresponsive engines` lines in the logs and tune engines in `searxng/settings.yml`.
 - **Ranking is rule-based.** It handles common question types well but can miss when the answer is phrased unusually, for example lists of past officeholders for *who is* questions. Turning on AI answers helps with those cases.
 - **JavaScript-heavy pages and PDFs** are not extracted; the search engine's snippet is used instead.
+- **No outbound proxy for page fetches.** To keep the SSRF check effective, page fetches connect directly and ignore `HTTP_PROXY`/`HTTPS_PROXY`. Networks that only allow internet access through a proxy aren't supported yet.
 
 ## Responsible use
 
-SearXNG and the DuckDuckGo fallback query public search engines. Automated queries may conflict with those engines' terms of service, and heavy use gets rate-limited or blocked. You are responsible for how you deploy and use OpenScour. Keep traffic reasonable, respect site terms when fetching pages, and consider a licensed search API for commercial-scale use.
+SearXNG and the DuckDuckGo fallback query public search engines. Automated queries may conflict with those engines' terms of service, and heavy use gets rate-limited or blocked. When OpenScour reads pages itself, it identifies itself honestly and follows each site's robots.txt. You are responsible for how you deploy and use OpenScour: keep traffic reasonable, and consider a licensed search API for commercial-scale use.
 
 OpenScour is not affiliated with SearXNG, DuckDuckGo or any search engine.
 

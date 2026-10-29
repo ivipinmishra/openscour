@@ -27,10 +27,20 @@ class Settings(BaseSettings):
     basic_fetch_deadline: float = 2.0
     max_page_bytes: int = 3_000_000
     cache_ttl_seconds: int = 900
-    user_agent: str = (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/130.0 Safari/537.36"
-    )
+    # Pages being fetched at once across all requests; more wait their turn.
+    # Requests beyond max_inflight_fetches use search snippets instead.
+    max_inflight_fetches: int = 200
+    # Extraction workers are replaced after this many pages, so memory
+    # fragmentation in lxml can't build up in a long-running server.
+    extract_max_tasks_per_child: int = 500
+
+    # Identify honestly to the sites OpenScour reads, and follow their robots.txt.
+    user_agent: str = "OpenScour/0.2 (+https://github.com/ivipinmishra/openscour)"
+    respect_robots_txt: bool = True
+    # Pages are only fetched from public internet addresses (SSRF protection).
+    # Set to true only for a trusted, internal-only deployment that must read
+    # intranet pages; never on a server untrusted callers can reach.
+    allow_private_network_fetches: bool = False
 
     @property
     def api_key_set(self) -> set[str]:

@@ -1,22 +1,43 @@
 services:
   searxng:
-    image: searxng/searxng:latest
+    # Pinned so an upstream release can't change behavior unannounced; update deliberately.
+    image: searxng/searxng:2026.10.27-b5ed73fcb
+    # Only reachable from this machine; the API reaches it over the compose network.
     ports:
-      - "8888:8080"
+      - "127.0.0.1:8888:8080"
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     environment:
       - SEARXNG_BASE_URL=http://localhost:8888/
+    cap_drop:
+      - ALL
+    cap_add:
+      # The image's entrypoint switches to its own unprivileged user.
+      - CHOWN
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
   api:
     build: .
+    # Bound to this machine only. To serve other machines, remove "127.0.0.1:"
+    # and set API_KEYS (see "Deploying" in the README).
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - SEARXNG_URL=http://searxng:8080
       - API_KEYS=${API_KEYS:-}
       - ANSWER_PROVIDER=${ANSWER_PROVIDER:-none}
+    read_only: true
+    tmpfs:
+      # Extraction worker processes need a writable /tmp for their semaphores.
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       - searxng
     restart: unless-stopped
