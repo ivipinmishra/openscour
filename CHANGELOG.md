@@ -2,6 +2,13 @@
 
 All notable changes to OpenScour are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-10-30
+
+### Packaging
+- Published on [PyPI](https://pypi.org/project/openscour/): `pip install openscour`, and `uvx --from "openscour[mcp]==0.3.1" openscour-mcp` for the MCP server. New releases are published automatically from GitHub releases through PyPI trusted publishing.
+- Package metadata (project links, classifiers, keywords) and a `py.typed` marker, so type checkers use the client's type hints.
+- The package contains only an explicit list of files, so local files such as `.env` can never be published.
+
 ## [0.3.0] - 2026-10-29
 
 Operations and client resilience (phase 2 of the enterprise roadmap).
@@ -70,6 +77,7 @@ First release.
 ### MCP server
 - `openscour-mcp` gives AI agents read-only `search` and `extract` tools, with setup instructions for Claude Code, Kiro, Cursor, Claude Desktop and VS Code.
 
+[0.3.1]: https://github.com/ivipinmishra/openscour/releases/tag/v0.3.1
 [0.3.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.1.0

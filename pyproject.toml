@@ -1,11 +1,26 @@
 [project]
 name = "openscour"
-version = "0.3.0"
+version = "0.3.1"
 description = "Self-hosted web search API for LLMs and agents that returns answer-first passages"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
+authors = [{ name = "ivipinmishra" }]
+keywords = ["search", "web-search", "llm", "rag", "ai-agents", "mcp", "searxng", "self-hosted"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Framework :: FastAPI",
+    "Topic :: Internet :: WWW/HTTP :: Indexing/Search",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
 # The client only needs httpx; the server's dependencies are the "server" extra.
 dependencies = ["httpx>=0.27"]
 
@@ -20,6 +35,12 @@ server = [
 ]
 mcp = ["mcp>=2.3"]
 
+[project.urls]
+Homepage = "https://github.com/ivipinmishra/openscour"
+Documentation = "https://github.com/ivipinmishra/openscour#readme"
+Changelog = "https://github.com/ivipinmishra/openscour/blob/main/CHANGELOG.md"
+Issues = "https://github.com/ivipinmishra/openscour/issues"
+
 [project.scripts]
 openscour-server = "openscour.server.main:run"
 openscour-mcp = "openscour.mcp_server:main"
@@ -30,6 +51,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["openscour"]
+# Never ship local secrets that sit inside the package folder.
+exclude = ["**/.env", "**/.env.*"]
+
+[tool.hatch.build.targets.sdist]
+# An explicit list, so nothing local (secrets, private notes) can end up on PyPI.
+only-include = ["openscour", "tests", "README.md", "CHANGELOG.md", "LICENSE", "pyproject.toml"]
+exclude = ["**/.env", "**/.env.*"]
 
 [tool.uv]
 # Developing here means working on both halves.

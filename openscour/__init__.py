@@ -18,7 +18,7 @@ from openscour.errors import (
 )
 from openscour.types import ExtractResponse, ExtractResult, FailedResult, SearchResponse, SearchResult
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 __all__ = [
     "OpenScour",

@@ -3,10 +3,10 @@
 **Self-hosted web search for LLMs and AI agents. Answer-first passages, no paid search API.**
 
 [![Tests](https://github.com/ivipinmishra/openscour/actions/workflows/tests.yml/badge.svg)](https://github.com/ivipinmishra/openscour/actions/workflows/tests.yml)
-[![Release](https://img.shields.io/badge/release-v0.3.0-orange)](https://github.com/ivipinmishra/openscour/releases/latest)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
-[![Docker](https://img.shields.io/badge/docker-compose-2496ED.svg)](docker-compose.yml)
+[![PyPI](https://img.shields.io/badge/pypi-v0.3.1-orange)](https://pypi.org/project/openscour/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/ivipinmishra/openscour/blob/main/LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://github.com/ivipinmishra/openscour/blob/main/pyproject.toml)
+[![Docker](https://img.shields.io/badge/docker-compose-2496ED.svg)](https://github.com/ivipinmishra/openscour/blob/main/docker-compose.yml)
 [![MCP](https://img.shields.io/badge/MCP-server-5c4ee5.svg)](#option-3-ai-agents-mcp)
 
 OpenScour searches the web, reads the result pages and returns the passages that actually answer your query, ready to drop into an LLM prompt. You run it on your own machine or cloud account, and it needs no API key from any search provider.
@@ -133,18 +133,16 @@ Every field and the response format are in the [API reference](#api-reference).
 
 ### Option 2: Python client
 
-**Install** it in your project. OpenScour is not on PyPI yet, so install it from GitHub. The commands pin release `v0.3.0`; see [Versions and updates](#versions-and-updates) for newer releases.
-
-With [uv](https://docs.astral.sh/uv/):
+**Install** it from [PyPI](https://pypi.org/project/openscour/) in your project, with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv add git+https://github.com/ivipinmishra/openscour@v0.3.0
+uv add openscour
 ```
 
 Or with pip, inside a virtual environment:
 
 ```bash
-pip install git+https://github.com/ivipinmishra/openscour@v0.3.0
+pip install openscour
 ```
 
 The client only needs `httpx`; none of the server's dependencies are installed.
@@ -183,20 +181,20 @@ OpenScour includes an [MCP](https://modelcontextprotocol.io) server that gives A
 | `search` | Searches the web and returns numbered results with title, URL and the best passage. Takes the same options as the API. |
 | `extract` | Reads up to 20 URLs. With a `query`, returns only each page's most relevant passages, so long pages don't flood the agent's context. Without one, it returns the full text, capped at 20,000 characters per page. |
 
-Both tools are read-only. The MCP server runs on your machine, started by your agent, and passes requests to your OpenScour server from [Step 1](#step-1-start-the-server). You need [uv](https://docs.astral.sh/uv/) installed; it downloads and runs the MCP server from GitHub automatically.
+Both tools are read-only. The MCP server runs on your machine, started by your agent, and passes requests to your OpenScour server from [Step 1](#step-1-start-the-server). You need [uv](https://docs.astral.sh/uv/) installed; it downloads and runs the MCP server from PyPI automatically. The configurations below pin a version (`==0.3.1`), so your agent only changes when you choose.
 
 If your OpenScour server isn't at `http://localhost:8000`, or it requires a key, set `OPENSCOUR_BASE_URL` and `OPENSCOUR_API_KEY` in the configurations below.
 
 #### Claude Code
 
 ```bash
-claude mcp add openscour -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.3.0" openscour-mcp
+claude mcp add openscour -- uvx --from "openscour[mcp]==0.3.1" openscour-mcp
 ```
 
 With a different server address or a key:
 
 ```bash
-claude mcp add openscour -e OPENSCOUR_BASE_URL=https://search.example.com -e OPENSCOUR_API_KEY=YOUR_API_KEY -- uvx --from "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.3.0" openscour-mcp
+claude mcp add openscour -e OPENSCOUR_BASE_URL=https://search.example.com -e OPENSCOUR_API_KEY=YOUR_API_KEY -- uvx --from "openscour[mcp]==0.3.1" openscour-mcp
 ```
 
 Restart Claude Code, then ask something like *"What changed in Amazon Bedrock this month?"*.
@@ -211,7 +209,7 @@ Restart Claude Code, then ask something like *"What changed in Amazon Bedrock th
      "mcpServers": {
        "openscour": {
          "command": "uvx",
-         "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.3.0", "openscour-mcp"],
+         "args": ["--from", "openscour[mcp]==0.3.1", "openscour-mcp"],
          "env": { "OPENSCOUR_BASE_URL": "http://localhost:8000" },
          "disabled": false,
          "autoApprove": ["search", "extract"]
@@ -242,7 +240,7 @@ Add the same command to the client's MCP configuration:
   "mcpServers": {
     "openscour": {
       "command": "uvx",
-      "args": ["--from", "openscour[mcp] @ git+https://github.com/ivipinmishra/openscour@v0.3.0", "openscour-mcp"],
+      "args": ["--from", "openscour[mcp]==0.3.1", "openscour-mcp"],
       "env": { "OPENSCOUR_BASE_URL": "http://localhost:8000" }
     }
   }
@@ -253,16 +251,16 @@ The file's location depends on the client; see its documentation for "MCP server
 
 #### Updating and troubleshooting
 
-- **Update to a new release.** Change `v0.3.0` in the configuration to the new version and restart the server in your agent, or restart the agent. See [Versions and updates](#versions-and-updates).
+- **Update to a new release.** Change `0.3.1` in the configuration to the new version and restart the server in your agent, or restart the agent. See [Versions and updates](#versions-and-updates).
 - **"command not found: uvx".** Desktop apps launched from the Dock may not see your terminal's `PATH`. Use the full path from `which uvx` as `command`, for example `/opt/homebrew/bin/uvx` on Apple Silicon Macs with Homebrew.
 - **"Could not reach OpenScour".** The OpenScour server isn't running or `OPENSCOUR_BASE_URL` is wrong. Start it as in [Step 1](#step-1-start-the-server).
 
 ## Example: answer questions with Claude
 
-The most common use of OpenScour is giving an LLM current information. This example searches with OpenScour, then has Claude answer from the passages it found, citing them. The full script is in [`examples/answer_with_claude.py`](examples/answer_with_claude.py).
+The most common use of OpenScour is giving an LLM current information. This example searches with OpenScour, then has Claude answer from the passages it found, citing them. The full script is in [`examples/answer_with_claude.py`](https://github.com/ivipinmishra/openscour/blob/main/examples/answer_with_claude.py).
 
 ```bash
-uv add git+https://github.com/ivipinmishra/openscour@v0.3.0 anthropic
+uv add openscour anthropic
 ```
 
 ```python
@@ -296,15 +294,15 @@ Because the passages are short and answer-first, the prompt stays small (about 7
 
 ## Versions and updates
 
-OpenScour is released as tagged versions on [GitHub Releases](https://github.com/ivipinmishra/openscour/releases); what changed in each is in the [changelog](CHANGELOG.md). The install commands in this README pin a version (`@v0.3.0`), so your setup only changes when you choose.
+OpenScour is published on [PyPI](https://pypi.org/project/openscour/) and as tagged versions on [GitHub Releases](https://github.com/ivipinmishra/openscour/releases); what changed in each is in the [changelog](https://github.com/ivipinmishra/openscour/blob/main/CHANGELOG.md). Versions follow semantic versioning.
 
 To update:
 
-- **Python client:** change the version in your install command, e.g. `uv add git+https://github.com/ivipinmishra/openscour@v0.3.0`.
-- **MCP server:** change the version in your agent's configuration and restart the server in the agent.
-- **Server:** in your clone, run `git fetch --tags`, `git checkout v0.3.0` and `docker compose up -d --build`.
+- **Python client:** `uv add openscour --upgrade-package openscour`, or `pip install --upgrade openscour`.
+- **MCP server:** change the version in your agent's configuration (`openscour[mcp]==0.3.1`) and restart the server in the agent.
+- **Server:** in your clone, run `git fetch --tags`, `git checkout v0.3.1` and `docker compose up -d --build`.
 
-To always follow the newest code instead, leave out `@v0.3.0`. The MCP server is then cached after its first download; get newer code by stopping it in your agent, running `uv cache clean openscour`, and starting it again.
+To always run the newest MCP server instead, use `openscour[mcp]@latest` in the configuration; uv then checks PyPI for a newer version each time the agent starts it.
 
 ## API reference
 
@@ -489,7 +487,7 @@ Searches and pages are cached in memory for 15 minutes.
 
 ## Configuration
 
-Set environment variables on the server, or copy [`.env.example`](.env.example) to `.env`.
+Set environment variables on the server, or copy [`.env.example`](https://github.com/ivipinmishra/openscour/blob/main/.env.example) to `.env`.
 
 | Variable | Default | Description |
 |---|---|---|
@@ -530,13 +528,13 @@ uv sync
 uv run openscour-server --port 8000
 ```
 
-To install the server into another environment, use the `server` extra: `pip install "openscour[server] @ git+https://github.com/ivipinmishra/openscour@v0.3.0"`.
+To install the server into another environment, use the `server` extra: `pip install "openscour[server]"`.
 
 ## Security
 
 - **Server-side request forgery (SSRF) protection.** Pages are only fetched from public internet addresses. The check runs on the IP address actually being connected to, on every redirect, so URLs such as `http://169.254.169.254/` (cloud instance credentials), `http://localhost`, private network ranges, and public hostnames that resolve to private addresses are all refused with a `blocked:` error. Proxy environment variables are ignored for page fetches so they can't bypass the check.
   - `ALLOW_PRIVATE_NETWORK_FETCHES=true` turns this off, for example to search an intranet. Only do that on a deployment that untrusted callers, including AI agents reading untrusted pages, cannot reach.
-- **Honest identity and robots.txt.** OpenScour identifies itself as `OpenScour/<version>` (for example `OpenScour/0.3.0`) with a link to this repository, and skips pages a site's robots.txt disallows (the `OpenScour` user-agent token, or `*`).
+- **Honest identity and robots.txt.** OpenScour identifies itself as `OpenScour/<version>` (for example `OpenScour/0.3.1`) with a link to this repository, and skips pages a site's robots.txt disallows (the `OpenScour` user-agent token, or `*`).
 - **Container hardening.** The API image runs as an unprivileged user with a read-only filesystem, no Linux capabilities and `no-new-privileges`, and has a health check. The SearXNG image is pinned to a specific release.
 - **Rate limits.** Each API key, or each client IP when auth is off, gets `RATE_LIMIT_PER_MINUTE` requests a minute, so one runaway agent can't starve other clients or get your server blocked by search engines. Limits are kept per instance.
 - **Local by default.** Docker Compose publishes both ports on `127.0.0.1` only, so nothing is reachable from other machines until you choose to expose it.
@@ -545,7 +543,7 @@ To install the server into another environment, use the `server` extra: `pip ins
 
 Before you expose OpenScour beyond your own machine:
 
-- Change `server.secret_key` in [`searxng/settings.yml`](searxng/settings.yml). The checked-in value is a placeholder for local use.
+- Change `server.secret_key` in [`searxng/settings.yml`](https://github.com/ivipinmishra/openscour/blob/main/searxng/settings.yml). The checked-in value is a placeholder for local use.
 - Set `API_KEYS` so only your applications can call the API, and give each client its key through `OPENSCOUR_API_KEY`.
 - Publish only the API: in `docker-compose.yml`, change `"127.0.0.1:8000:8000"` to `"8000:8000"`, ideally behind HTTPS. Keep SearXNG's port local or remove it.
 - Point your load balancer's health check at `/health/ready`, and the container's liveness check at `/health`.
@@ -612,4 +610,4 @@ Issues and pull requests are welcome. For ranking changes, include a query that 
 
 ## License
 
-[MIT](LICENSE). SearXNG runs as a separate, unmodified container and is licensed under AGPL-3.0.
+[MIT](https://github.com/ivipinmishra/openscour/blob/main/LICENSE). SearXNG runs as a separate, unmodified container and is licensed under AGPL-3.0.
