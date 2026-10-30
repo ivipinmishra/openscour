@@ -2,6 +2,16 @@
 
 All notable changes to OpenScour are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Search engines
+- SearXNG uses Brave, Bing and Yahoo for web results, and Brave News, Bing News and Wikinews for news. In measurements, Google, DuckDuckGo, Qwant and Google CSE blocked almost every automated query, so they are off, along with translation and currency engines that don't return web pages.
+- Searches and pages are cached for an hour instead of 15 minutes (`CACHE_TTL_SECONDS`), so repeated searches send fewer queries to the engines.
+
+### Monitoring
+- Each search's log line shows which engines answered and which failed, and why: `engines=bing,brave engines_failed=google:CAPTCHA`, plus `fallback=duckduckgo` when the fallback was used.
+- `/health/ready` reports each engine's status from the last 15 minutes of searches, and is "degraded" when every engine is blocking.
+
 ## [0.3.1] - 2026-10-30
 
 ### Packaging

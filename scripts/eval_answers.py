@@ -21,7 +21,7 @@ CASES = [
     ("Who founded SpaceX?", r"Musk"),
     ("What is the capital of Australia?", r"Canberra"),
     ("When was the Declaration of Independence signed?", r"1776"),
-    ("How long is the Great Wall of China?", r"\d[\d,.]* ?(km|kilomet|mi)"),
+    ("How long is the Great Wall of China?", r"\d[\d,.]*\s?(km|kilomet|mi)"),
     ("When did World War 2 end?", r"1945"),
 ]
 

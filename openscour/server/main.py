@@ -140,6 +140,16 @@ def rate_limit(request: Request, key: str | None = Depends(require_api_key)) -> 
         )
 
 
+def _engine_log_fields(stats: dict) -> dict[str, str]:
+    """Which search engines answered, for the request log: engines=brave,bing engines_failed=google:CAPTCHA."""
+    fields = {"engines": ",".join(stats.get("engines", [])) or "none"}
+    if failed := stats.get("engines_failed"):
+        fields["engines_failed"] = ",".join(f"{name}:{reason}".replace(" ", "_") for name, reason in failed.items())
+    if fallback := stats.get("fallback"):
+        fields["fallback"] = fallback
+    return fields
+
+
 @app.get("/health")
 async def health():
     """Liveness: the process is up. Checks nothing else, so it stays fast."""
@@ -153,19 +163,26 @@ async def ready(request: Request):
     When SearXNG is down but the DuckDuckGo fallback is on, searches still work,
     so the instance reports "degraded" and stays in service: failing every
     instance at once for a shared dependency would turn degraded into down.
+    The same goes for search engines blocking requests: "engines" shows what
+    each engine did in the last 15 minutes of searches, and the instance is
+    "degraded" when none of them answered.
     """
     try:
         resp = await request.app.state.http.get(f"{settings.searxng_url.rstrip('/')}/healthz", timeout=2.0)
         searxng = "ok" if resp.status_code == 200 else "error"
     except httpx.HTTPError:
         searxng = "error"
-    if searxng == "ok":
+    engines = providers.engine_health.recent()
+    engines_blocked = bool(engines) and "ok" not in engines.values()
+    if searxng == "ok" and not engines_blocked:
         status, code = "ready", 200
+    elif searxng == "ok":
+        status, code = "degraded", 200
     elif settings.duckduckgo_fallback:
         status, code = "degraded", 200
     else:
         status, code = "not ready", 503
-    return JSONResponse({"status": status, "checks": {"searxng": searxng}}, status_code=code)
+    return JSONResponse({"status": status, "checks": {"searxng": searxng, "engines": engines}}, status_code=code)
 
 
 @app.post("/search", response_model=SearchResponse, dependencies=[Depends(rate_limit)])
@@ -184,6 +201,7 @@ async def search(req: SearchRequest, request: Request) -> SearchResponse:
     n_candidates = req.max_results * 2 if extra is None else req.max_results + extra
 
     client: httpx.AsyncClient = request.app.state.http
+    engine_stats: dict = {}
     raw = await providers.search(
         client,
         req.query,
@@ -192,7 +210,9 @@ async def search(req: SearchRequest, request: Request) -> SearchResponse:
         time_range=req.time_range,
         include_domains=req.include_domains,
         exclude_domains=req.exclude_domains,
+        stats=engine_stats,
     )
+    request.state.log_fields = _engine_log_fields(engine_stats)
     if not raw:
         raise HTTPException(status_code=502, detail="No results from search backends")
 
@@ -238,6 +258,7 @@ async def search(req: SearchRequest, request: Request) -> SearchResponse:
     search_cache.set(cache_key, resp)
     request.state.log_fields = {
         "cache": "miss",
+        **_engine_log_fields(engine_stats),
         "candidates": len(raw),
         "pages_fetched": sum(isinstance(p, str) for p in pages.values()),
         "results": len(results),

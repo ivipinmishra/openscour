@@ -372,22 +372,26 @@ Returns `{"status": "ok"}` while the server process is running. Use it as a cont
 
 ### `GET /health/ready`
 
-Whether this instance can serve searches; use it as a load balancer or Kubernetes readiness check. It checks that SearXNG responds:
+Whether this instance can serve searches; use it as a load balancer or Kubernetes readiness check. It checks that SearXNG responds, and reports what each search engine did in the last 15 minutes of real searches:
 
-| Status | Response | Meaning |
+```json
+{"status": "ready", "checks": {"searxng": "ok", "engines": {"bing": "ok", "brave": "ok", "yahoo": "CAPTCHA"}}}
+```
+
+| Status | `status` | Meaning |
 |---|---|---|
-| `200` | `{"status": "ready", "checks": {"searxng": "ok"}}` | Everything works |
-| `200` | `{"status": "degraded", "checks": {"searxng": "error"}}` | SearXNG is down, searches use the DuckDuckGo fallback |
-| `503` | `{"status": "not ready", "checks": {"searxng": "error"}}` | SearXNG is down and the fallback is off |
+| `200` | `ready` | SearXNG responds and at least one engine is answering |
+| `200` | `degraded` | SearXNG is down and searches use the DuckDuckGo fallback, or every engine is currently blocking requests |
+| `503` | `not ready` | SearXNG is down and the fallback is off |
 
-A degraded instance stays in service on purpose: SearXNG is shared by all instances, so failing them all at once would turn slower searches into an outage.
+A degraded instance stays in service on purpose: SearXNG and the search engines are shared by all instances, so failing them all at once would turn slower searches into an outage. Engine status comes only from real searches; OpenScour never sends extra queries to check engines, since that traffic is what gets them blocked.
 
 ### Request IDs
 
-Every response has an `X-Request-ID` header. Send your own `X-Request-ID` (up to 128 letters, digits, `.`, `_` or `-`) to trace a request through your logs and OpenScour's; otherwise one is generated. The server logs one line per request with its ID, status, duration, and for searches whether it was cached and how many pages were read:
+Every response has an `X-Request-ID` header. Send your own `X-Request-ID` (up to 128 letters, digits, `.`, `_` or `-`) to trace a request through your logs and OpenScour's; otherwise one is generated. The server logs one line per request with its ID, status, duration, and for searches whether it was cached, which search engines answered or failed, and how many pages were read:
 
 ```
-request_id=3f9c… method=POST path=/search status=200 duration_ms=2140 cache=miss candidates=8 pages_fetched=6 results=5
+request_id=3f9c… method=POST path=/search status=200 duration_ms=2140 cache=miss engines=bing,brave,yahoo engines_failed=wikipedia:timeout candidates=8 pages_fetched=6 results=5
 ```
 
 ### Errors
@@ -483,7 +487,7 @@ query ────────► │  SearXNG   │──►│  Fetch pages �
    - **page quality:** passages near the top of a page rank higher, and boilerplate ranks lower
 5. **Answer (optional).** Claude reads the top passages and writes a short answer with citations.
 
-Searches and pages are cached in memory for 15 minutes.
+Searches and pages are cached in memory for an hour (`CACHE_TTL_SECONDS`), which also keeps queries to the search engines down.
 
 ## Configuration
 
@@ -503,7 +507,7 @@ Set environment variables on the server, or copy [`.env.example`](https://github
 | `EXTRACT_MAX_TASKS_PER_CHILD` | `500` | Pages a worker extracts before it is replaced, to keep memory flat |
 | `FETCH_CONCURRENCY` | `10` | Page downloads at once, across all requests |
 | `MAX_INFLIGHT_FETCHES` | `200` | Fetches queued or running at once; beyond this, searches use snippets |
-| `CACHE_TTL_SECONDS` | `900` | How long searches and pages stay cached |
+| `CACHE_TTL_SECONDS` | `3600` | How long searches and pages stay cached |
 | `USER_AGENT` | `OpenScour/<version> (+repository URL)` | How OpenScour identifies itself to websites |
 | `RESPECT_ROBOTS_TXT` | `true` | Skip pages a site's robots.txt disallows |
 | `ALLOW_PRIVATE_NETWORK_FETCHES` | `false` | Allow fetching pages from private addresses. See [Security](#security) before enabling |
@@ -552,7 +556,7 @@ Before you expose OpenScour beyond your own machine:
 
 ## Known limitations
 
-- **Upstream engines rate-limit.** SearXNG gets results by querying public search engines, and some (Google, DuckDuckGo) answer heavy or automated traffic with CAPTCHAs or blocks. Cloud IP ranges such as AWS are blocked more often. SearXNG uses whichever engines respond; check the `unresponsive engines` lines in the logs and tune engines in `searxng/settings.yml`.
+- **Search engines rate-limit.** SearXNG gets results by querying public search engines, which answer heavy or automated traffic with CAPTCHAs or blocks; SearXNG then pauses a blocked engine for up to a day. In testing from a home connection, Google, DuckDuckGo and Qwant blocked almost every query while Brave, Bing and Yahoo answered all of them, so [`searxng/settings.yml`](https://github.com/ivipinmishra/openscour/blob/main/searxng/settings.yml) enables those three. Which engines work depends on your network, and cloud IP ranges such as AWS are blocked more often. Watch the `engines` and `engines_failed` log fields and `/health/ready`, and adjust the engine list when results get thin. The DuckDuckGo fallback is affected by the same blocks. For sustained production traffic, plan for a licensed search API.
 - **Ranking is rule-based.** It handles common question types well but can miss when the answer is phrased unusually, for example lists of past officeholders for *who is* questions. Turning on AI answers helps with those cases.
 - **JavaScript-heavy pages and PDFs** are not extracted; the search engine's snippet is used instead.
 - **No outbound proxy for page fetches.** To keep the SSRF check effective, page fetches connect directly and ignore `HTTP_PROXY`/`HTTPS_PROXY`. Networks that only allow internet access through a proxy aren't supported yet.

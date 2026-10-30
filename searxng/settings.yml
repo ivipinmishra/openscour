@@ -20,3 +20,42 @@ outgoing:
   # Engines that haven't answered by then are skipped; the others' results are used.
   request_timeout: 2.0
   max_request_timeout: 3.0
+
+# Engines chosen by measurement (October 2026): Brave, Bing and Yahoo answered
+# every test query, while DuckDuckGo, Google, Qwant and Google CSE mostly
+# returned CAPTCHAs or "access denied". Engines that are blocked only add
+# failures, and SearXNG pauses a blocked engine for up to a day anyway.
+# Re-check with the per-request "engines" log fields if results get thin.
+engines:
+  - name: brave
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: yahoo
+    disabled: false
+  - name: duckduckgo
+    disabled: true
+  - name: google cse
+    disabled: true
+  # Translation and currency engines don't return web pages.
+  - name: currency
+    disabled: true
+  - name: dictzone
+    disabled: true
+  - name: lingva
+    disabled: true
+  - name: mymemory translated
+    disabled: true
+  # News
+  - name: brave.news
+    disabled: false
+  - name: bing news
+    disabled: false
+  - name: wikinews
+    disabled: false
+  - name: duckduckgo news
+    disabled: true
+  - name: google news
+    disabled: true
+  - name: reuters
+    disabled: true

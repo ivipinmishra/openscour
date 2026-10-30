@@ -47,6 +47,8 @@ def fake_search(monkeypatch):
 
     async def search(client, query, max_candidates, **kwargs):
         calls.append((query, kwargs))
+        if (stats := kwargs.get("stats")) is not None:
+            stats.update(engines=["bing", "brave"], engines_failed={"google": "CAPTCHA"})
         return results
 
     monkeypatch.setattr(providers, "search", search)
@@ -165,7 +167,7 @@ def test_request_log_line(client, fake_search, caplog):
         client.post("/search", json={"query": "vice president"}, headers={"X-Request-ID": "req-2"})
     first, second = (r.getMessage() for r in caplog.records if r.name == "openscour.access")
     assert first.startswith("request_id=req-1 method=POST path=/search status=200 duration_ms=")
-    assert "cache=miss candidates=2 pages_fetched=1 results=2" in first
+    assert "cache=miss engines=bing,brave engines_failed=google:CAPTCHA candidates=2 pages_fetched=1" in first
     assert "cache=hit" in second
 
 
@@ -174,6 +176,7 @@ def test_request_log_line(client, fake_search, caplog):
     [(200, True, "ready", 200), (None, True, "degraded", 200), (500, False, "not ready", 503)],
 )
 def test_readiness(client, monkeypatch, searxng_status, fallback, status, code):
+    monkeypatch.setattr(providers, "engine_health", providers.EngineHealth())
     def handler(request):
         assert request.url.path == "/healthz"
         if searxng_status is None:
@@ -185,3 +188,17 @@ def test_readiness(client, monkeypatch, searxng_status, fallback, status, code):
     resp = client.get("/health/ready")
     assert resp.status_code == code
     assert resp.json()["status"] == status
+
+
+def test_readiness_is_degraded_when_every_engine_is_blocked(client, monkeypatch):
+    health = providers.EngineHealth()
+    monkeypatch.setattr(providers, "engine_health", health)
+    client.app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+
+    health.record([], {"google": "CAPTCHA", "duckduckgo": "too many requests"})
+    body = client.get("/health/ready").json()
+    assert body["status"] == "degraded"
+    assert body["checks"]["engines"] == {"duckduckgo": "too many requests", "google": "CAPTCHA"}
+
+    health.record(["brave"], {})
+    assert client.get("/health/ready").json()["status"] == "ready"

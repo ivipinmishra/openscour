@@ -28,7 +28,8 @@ class Settings(BaseSettings):
     # pages that aren't ready; those pages keep loading in the background for the cache.
     basic_fetch_deadline: float = 2.0
     max_page_bytes: int = 3_000_000
-    cache_ttl_seconds: int = 900
+    # Longer caching means fewer queries to search engines, which rate-limit automated traffic.
+    cache_ttl_seconds: int = 3600
     # Pages being fetched at once across all requests; more wait their turn.
     # Requests beyond max_inflight_fetches use search snippets instead.
     max_inflight_fetches: int = 200
