@@ -7,8 +7,12 @@ services:
       - "127.0.0.1:8888:8080"
     volumes:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - ./searxng/start.sh:/usr/local/bin/openscour-start.sh:ro
+    # Adds SEARCH_PROXIES to SearXNG's settings, then runs the image's own entrypoint.
+    entrypoint: ["/bin/sh", "/usr/local/bin/openscour-start.sh"]
     environment:
       - SEARXNG_BASE_URL=http://localhost:8888/
+      - SEARCH_PROXIES=${SEARCH_PROXIES:-}
     cap_drop:
       - ALL
     cap_add:
@@ -30,6 +34,7 @@ services:
       - SEARXNG_URL=http://searxng:8080
       - API_KEYS=${API_KEYS:-}
       - ANSWER_PROVIDER=${ANSWER_PROVIDER:-none}
+      - SEARCH_PROXIES=${SEARCH_PROXIES:-}
     read_only: true
     tmpfs:
       # Extraction worker processes need a writable /tmp for their semaphores.

@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -129,7 +130,8 @@ def _ddg_search_sync(query: str, max_results: int, topic: str, time_range: str |
     from ddgs import DDGS
 
     timelimit = _DDG_TIMELIMIT.get(time_range) if time_range else None
-    with DDGS() as ddgs:
+    proxies = settings.search_proxy_list
+    with DDGS(proxy=random.choice(proxies) if proxies else None) as ddgs:
         if topic == "news":
             rows = ddgs.news(query, max_results=max_results, timelimit=timelimit)
             return [RawResult(r.get("title", ""), r.get("url", ""), r.get("body", ""), r.get("date")) for r in rows]

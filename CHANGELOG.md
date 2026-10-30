@@ -6,10 +6,12 @@ All notable changes to OpenScour are listed here. Versions follow [Semantic Vers
 
 ### Search engines
 - SearXNG uses Brave, Bing and Yahoo for web results, and Brave News, Bing News and Wikinews for news. In measurements, Google, DuckDuckGo, Qwant and Google CSE blocked almost every automated query, so they are off, along with translation and currency engines that don't return web pages.
+- `SEARCH_PROXIES` sends queries to search engines through one or more proxies, taken in turn, to get past IP blocks (more common on cloud servers). Docker Compose passes them to SearXNG and the DuckDuckGo fallback uses them too. They come from the environment, so proxy passwords stay out of git. Page downloads still connect directly, so the SSRF check keeps working.
 - Searches and pages are cached for an hour instead of 15 minutes (`CACHE_TTL_SECONDS`), so repeated searches send fewer queries to the engines.
 
 ### Monitoring
 - Each search's log line shows which engines answered and which failed, and why: `engines=bing,brave engines_failed=google:CAPTCHA`, plus `fallback=duckduckgo` when the fallback was used.
+- Configuration errors no longer repeat the setting's value, so API keys and proxy passwords can't end up in logs.
 - `/health/ready` reports each engine's status from the last 15 minutes of searches, and is "degraded" when every engine is blocking.
 
 ## [0.3.1] - 2026-10-30

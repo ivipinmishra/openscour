@@ -1,12 +1,15 @@
 from typing import Literal
+from urllib.parse import urlsplit
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from openscour import __version__
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # Errors don't repeat the value: API keys and proxy passwords would end up in logs.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     # Comma-separated list of keys clients must send as "Authorization: Bearer <key>".
     # Leave empty to disable auth (local development).
@@ -15,6 +18,11 @@ class Settings(BaseSettings):
     searxng_url: str = "http://localhost:8888"
     # Used only when SearXNG errors out or returns nothing.
     duckduckgo_fallback: bool = True
+    # Comma-separated proxy URLs (http://, https://, socks5://, socks5h://) for
+    # queries to search engines, used in turn. Docker Compose passes them to
+    # SearXNG too. Page downloads don't use them: the SSRF guard has to see the
+    # address it connects to.
+    search_proxies: str = ""
 
     # include_answer backend. "none" makes include_answer return null.
     answer_provider: Literal["none", "bedrock", "anthropic"] = "none"
@@ -52,9 +60,30 @@ class Settings(BaseSettings):
     # Only enable behind a proxy that sets it: clients can forge it otherwise.
     trust_forwarded_for: bool = False
 
+    @field_validator("search_proxies")
+    @classmethod
+    def _check_proxies(cls, value: str) -> str:
+        for proxy in _split(value):
+            parts = urlsplit(proxy)
+            if parts.scheme not in PROXY_SCHEMES or not parts.hostname:
+                # Don't echo the URL: it may contain a password.
+                raise ValueError(f"SEARCH_PROXIES entries must be URLs starting with {', '.join(PROXY_SCHEMES)}")
+        return value
+
     @property
     def api_key_set(self) -> set[str]:
-        return {k.strip() for k in self.api_keys.split(",") if k.strip()}
+        return set(_split(self.api_keys))
+
+    @property
+    def search_proxy_list(self) -> list[str]:
+        return _split(self.search_proxies)
+
+
+PROXY_SCHEMES = ("http", "https", "socks5", "socks5h")
+
+
+def _split(value: str) -> list[str]:
+    return [v.strip() for v in value.split(",") if v.strip()]
 
 
 settings = Settings()

@@ -498,6 +498,7 @@ Set environment variables on the server, or copy [`.env.example`](https://github
 | `API_KEYS` | empty (auth off) | Comma-separated keys that clients must send |
 | `SEARXNG_URL` | `http://localhost:8888` | Where the SearXNG instance runs |
 | `DUCKDUCKGO_FALLBACK` | `true` | Use DuckDuckGo when SearXNG returns nothing |
+| `SEARCH_PROXIES` | empty | Comma-separated proxy URLs for queries to search engines. See [Search engine proxies](#search-engine-proxies) |
 | `ANSWER_PROVIDER` | `none` | `bedrock` (uses your AWS credentials) or `anthropic` (uses `ANTHROPIC_API_KEY`) |
 | `ANSWER_MODEL` | `claude-opus-5-5` | Model used for AI answers |
 | `AWS_REGION` | `us-east-1` | Region for Amazon Bedrock |
@@ -516,6 +517,20 @@ Set environment variables on the server, or copy [`.env.example`](https://github
 
 Clients (the Python client and the MCP server) read `OPENSCOUR_BASE_URL` and `OPENSCOUR_API_KEY`.
 
+### Search engine proxies
+
+Search engines block IP addresses that send them many automated queries, and they block cloud ranges such as AWS more often than home connections. To send search engine queries through other addresses, list one or more proxies in `.env`:
+
+```bash
+SEARCH_PROXIES=http://user:password@proxy1.example.com:8080,socks5h://proxy2.example.com:1080
+```
+
+- `http://`, `https://`, `socks5://` and `socks5h://` proxies work (`socks5h` also resolves hostnames through the proxy). With several, each query uses the next one.
+- Docker Compose passes the list to both SearXNG and the API, and SearXNG gets 1 extra second per engine for the extra hop. The DuckDuckGo fallback uses a random proxy from the list.
+- Proxy URLs often contain passwords, so they are read from the environment rather than from `searxng/settings.yml`, which is in git. On startup, SearXNG logs how many proxies it uses, never the URLs.
+- Page downloads don't go through the proxies. The [SSRF check](#security) has to see the address it actually connects to, and a proxy would hide it.
+- Watch the `engines_failed` log field and `/health/ready` after adding proxies: a proxy that is down or rejects its password shows up there as failing engines.
+
 ### Running the server without Docker
 
 Keep only SearXNG in Docker and run the API with uv:
@@ -533,6 +548,8 @@ uv run openscour-server --port 8000
 ```
 
 To install the server into another environment, use the `server` extra: `pip install "openscour[server]"`.
+
+When SearXNG doesn't run through Docker Compose, `SEARCH_PROXIES` only applies to the DuckDuckGo fallback. Add the proxies to your SearXNG's own `settings.yml` under `outgoing: proxies:` instead.
 
 ## Security
 
@@ -556,14 +573,14 @@ Before you expose OpenScour beyond your own machine:
 
 ## Known limitations
 
-- **Search engines rate-limit.** SearXNG gets results by querying public search engines, which answer heavy or automated traffic with CAPTCHAs or blocks; SearXNG then pauses a blocked engine for up to a day. In testing from a home connection, Google, DuckDuckGo and Qwant blocked almost every query while Brave, Bing and Yahoo answered all of them, so [`searxng/settings.yml`](https://github.com/ivipinmishra/openscour/blob/main/searxng/settings.yml) enables those three. Which engines work depends on your network, and cloud IP ranges such as AWS are blocked more often. Watch the `engines` and `engines_failed` log fields and `/health/ready`, and adjust the engine list when results get thin. The DuckDuckGo fallback is affected by the same blocks. For sustained production traffic, plan for a licensed search API.
+- **Search engines rate-limit.** SearXNG gets results by querying public search engines, which answer heavy or automated traffic with CAPTCHAs or blocks; SearXNG then pauses a blocked engine for up to a day. In testing from a home connection, Google, DuckDuckGo and Qwant blocked almost every query while Brave, Bing and Yahoo answered all of them, so [`searxng/settings.yml`](https://github.com/ivipinmishra/openscour/blob/main/searxng/settings.yml) enables those three. Which engines work depends on your network, and cloud IP ranges such as AWS are blocked more often. Watch the `engines` and `engines_failed` log fields and `/health/ready`, and adjust the engine list or add [search engine proxies](#search-engine-proxies) when results get thin. The DuckDuckGo fallback is affected by the same blocks. For sustained production traffic, plan for a licensed search API.
 - **Ranking is rule-based.** It handles common question types well but can miss when the answer is phrased unusually, for example lists of past officeholders for *who is* questions. Turning on AI answers helps with those cases.
 - **JavaScript-heavy pages and PDFs** are not extracted; the search engine's snippet is used instead.
-- **No outbound proxy for page fetches.** To keep the SSRF check effective, page fetches connect directly and ignore `HTTP_PROXY`/`HTTPS_PROXY`. Networks that only allow internet access through a proxy aren't supported yet.
+- **No outbound proxy for page fetches.** `SEARCH_PROXIES` covers search engine queries only. To keep the SSRF check effective, page fetches connect directly and ignore `HTTP_PROXY`/`HTTPS_PROXY`, so networks that only allow internet access through a proxy aren't supported yet.
 
 ## Responsible use
 
-SearXNG and the DuckDuckGo fallback query public search engines. Automated queries may conflict with those engines' terms of service, and heavy use gets rate-limited or blocked. When OpenScour reads pages itself, it identifies itself honestly and follows each site's robots.txt. You are responsible for how you deploy and use OpenScour: keep traffic reasonable, and consider a licensed search API for commercial-scale use.
+SearXNG and the DuckDuckGo fallback query public search engines. Automated queries may conflict with those engines' terms of service, and heavy use gets rate-limited or blocked. Proxies spread queries across addresses; they don't change what those terms allow. When OpenScour reads pages itself, it identifies itself honestly and follows each site's robots.txt. You are responsible for how you deploy and use OpenScour: keep traffic reasonable, and consider a licensed search API for commercial-scale use.
 
 OpenScour is not affiliated with SearXNG, DuckDuckGo or any search engine.
 
@@ -604,6 +621,7 @@ openscour/
     ranker.py        Passage chunking and ranking
     answer.py        Optional Claude answers
 searxng/settings.yml SearXNG configuration
+searxng/start.sh     Starts SearXNG with SEARCH_PROXIES
 tests/               Unit tests for the client, MCP server and ranker
 scripts/             Manual search and answer-quality check
 ```
