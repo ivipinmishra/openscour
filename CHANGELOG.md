@@ -9,6 +9,9 @@ All notable changes to OpenScour are listed here. Versions follow [Semantic Vers
 - `SEARCH_PROXIES` sends queries to search engines through one or more proxies, taken in turn, to get past IP blocks (more common on cloud servers). Docker Compose passes them to SearXNG and the DuckDuckGo fallback uses them too. They come from the environment, so proxy passwords stay out of git. Page downloads still connect directly, so the SSRF check keeps working.
 - Searches and pages are cached for an hour instead of 15 minutes (`CACHE_TTL_SECONDS`), so repeated searches send fewer queries to the engines.
 
+### Search quality
+- Basic searches wait for the best-ranked pages instead of the fastest ones, and read at least 3 pages. With `max_results: 1` they used to answer from whichever page loaded first, so large pages that hold the answer (often Wikipedia) were skipped. Pages refused as "server busy" no longer count as ready.
+
 ### Monitoring
 - Each search's log line shows which engines answered and which failed, and why: `engines=bing,brave engines_failed=google:CAPTCHA`, plus `fallback=duckduckgo` when the fallback was used.
 - Configuration errors no longer repeat the setting's value, so API keys and proxy passwords can't end up in logs.

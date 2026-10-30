@@ -42,6 +42,11 @@ DEPTH = {
     "advanced": (None, 3, settings.fetch_timeout, None),  # None = 2x max_results
 }
 
+# A basic search returns early once max_results pages are read, but never with fewer
+# than this many: with max_results=1 it would otherwise rank only the fastest page
+# against bare search snippets, however poor that page is.
+MIN_PAGES_READ = 3
+
 # Pages that extract to fewer words than this also get the search snippet as a passage.
 SHORT_PAGE_WORDS = 150
 
@@ -216,7 +221,8 @@ async def search(req: SearchRequest, request: Request) -> SearchResponse:
     if not raw:
         raise HTTPException(status_code=502, detail="No results from search backends")
 
-    pages = await request.app.state.pages.fetch([r.url for r in raw], timeout, deadline, enough=req.max_results)
+    enough = max(req.max_results, MIN_PAGES_READ)
+    pages = await request.app.state.pages.fetch([r.url for r in raw], timeout, deadline, enough=enough)
 
     # Pages that could not be fetched still count, using the engine's snippet.
     docs = []

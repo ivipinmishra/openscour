@@ -136,6 +136,41 @@ async def test_too_many_fetches_in_flight_are_refused(monkeypatch):
     assert [str(v) for v in out.values() if isinstance(v, FetchError)] == ["server busy", "server busy"]
 
 
+async def test_deadline_waits_for_the_best_ranked_pages_not_the_fastest(monkeypatch):
+    # The best search result is often a large page that loads slowly; returning
+    # with whichever pages finish first would rank the answer out.
+    async def fake_fetch_page(client, url, timeout):
+        await asyncio.sleep({"best": 0.15, "broken": 0.01}.get(url.split("/")[2].split(".")[0], 0.01))
+        if "broken" in url:
+            raise FetchError("HTTP 403")
+        return f"text of {url}"
+
+    monkeypatch.setattr(fetcher, "fetch_page", fake_fetch_page)
+    cache = TTLCache(60)
+    cache.set("https://cached.example/", "cached text")
+    pages = PageFetcher(httpx.AsyncClient(), cache)
+    urls = ["https://broken.example/", "https://best.example/", "https://cached.example/", "https://fast.example/"]
+    out = await pages.fetch(urls, timeout=1, deadline=1, enough=2)
+    # A failed page is skipped, the cached page counts, and the slow top page is waited for.
+    assert out["https://best.example/"] == "text of https://best.example/"
+    assert isinstance(out["https://broken.example/"], FetchError)
+
+
+async def test_pages_refused_as_busy_do_not_count_as_ready(monkeypatch):
+    monkeypatch.setattr(fetcher.settings, "max_inflight_fetches", 2)
+
+    async def fake_fetch_page(client, url, timeout):
+        await asyncio.sleep(0.01 if "fast" in url else 0.1)
+        return f"text of {url}"
+
+    monkeypatch.setattr(fetcher, "fetch_page", fake_fetch_page)
+    pages = PageFetcher(httpx.AsyncClient(), TTLCache(60))
+    urls = ["https://fast.example/", "https://slower.example/", "https://refused.example/"]
+    out = await pages.fetch(urls, timeout=1, deadline=1, enough=2)
+    assert out["https://slower.example/"] == "text of https://slower.example/"
+    assert str(out["https://refused.example/"]) == "server busy"
+
+
 async def test_robots_disallowed_pages_are_not_downloaded(monkeypatch):
     downloaded = []
 

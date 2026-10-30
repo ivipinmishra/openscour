@@ -185,10 +185,13 @@ class PageFetcher:
     ) -> dict[str, str | FetchError]:
         """Fetch pages, using the cache.
 
-        Without a deadline, wait for every page. With one, return once `enough`
-        pages (counting cached ones) are ready, or when the deadline passes;
-        pages not ready by then come back as FetchError and keep loading in
-        the background, so a repeat request has them.
+        Without a deadline, wait for every page. With one, return once the
+        first `enough` readable pages in `urls` order (best search results
+        first; cached pages count, failed ones are skipped) are ready, or when
+        the deadline passes. Waiting for the fastest pages instead would drop
+        large pages, which often hold the answer. Pages not ready by then come
+        back as FetchError and keep loading in the background, so a repeat
+        request has them.
         """
         out: dict[str, str | FetchError] = {}
         tasks: dict[str, asyncio.Task[str]] = {}
@@ -202,21 +205,41 @@ class PageFetcher:
         if tasks and deadline is None:
             await asyncio.wait(tasks.values())
         elif tasks:
-            await _wait_for_enough(list(tasks.values()), (enough or len(urls)) - len(out), deadline)
+            slots = [out[url] if url in out else tasks[url] for url in urls]
+            await _wait_for_enough(slots, enough or len(urls), deadline)
         for url, task in tasks.items():
             out[url] = task_result(task) if task.done() else FetchError("not ready before the deadline")
         return out
 
 
-async def _wait_for_enough(tasks: list[asyncio.Task[str]], enough: int, deadline: float) -> None:
-    """Wait until `enough` tasks have produced page text, all tasks are done, or the deadline passes."""
+async def _wait_for_enough(
+    slots: list[str | FetchError | asyncio.Task[str]], enough: int, deadline: float
+) -> None:
+    """Wait until the first `enough` readable slots are in, every task is done, or the deadline passes.
+
+    Slots are cached text, errors, or fetches still running, best first. A
+    running fetch ahead of the first `enough` readable pages keeps the wait going.
+    """
     loop = asyncio.get_running_loop()
     end = loop.time() + deadline
-    pending = set(tasks)
-    while pending:
-        if sum(1 for t in tasks if t.done() and isinstance(task_result(t), str)) >= enough:
-            return
+    pending = {s for s in slots if isinstance(s, asyncio.Task)}
+    while pending and not _first_ready(slots, enough):
         remaining = end - loop.time()
         if remaining <= 0:
             return
         _, pending = await asyncio.wait(pending, timeout=remaining, return_when=asyncio.FIRST_COMPLETED)
+
+
+def _first_ready(slots: list[str | FetchError | asyncio.Task[str]], enough: int) -> bool:
+    """True when the first `enough` readable slots have text, with no running fetch before them."""
+    ready = 0
+    for slot in slots:
+        if isinstance(slot, asyncio.Task):
+            if not slot.done():
+                return False
+            slot = task_result(slot)
+        if isinstance(slot, str):
+            ready += 1
+            if ready >= enough:
+                return True
+    return False

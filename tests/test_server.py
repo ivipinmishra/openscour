@@ -23,9 +23,11 @@ class FakePages:
     def __init__(self, pages: dict[str, str | FetchError]):
         self.pages = pages
         self.requested: list[list[str]] = []
+        self.enough: list[int | None] = []
 
     async def fetch(self, urls, timeout, deadline=None, enough=None):
         self.requested.append(urls)
+        self.enough.append(enough)
         return {u: self.pages.get(u, FetchError("not found")) for u in urls}
 
 
@@ -78,6 +80,15 @@ def test_search_ranks_answer_first_and_uses_snippets_for_missing_pages(client, f
     slow = next(r for r in body["results"] if r["url"] == "https://slow.example/vp")
     assert "Snippet" in slow["content"]
     assert slow["published_date"] == "2026-10-01"
+
+
+@pytest.mark.parametrize(("max_results", "enough"), [(1, 3), (3, 3), (5, 5)])
+def test_basic_search_reads_several_pages_before_answering(client, fake_search, max_results, enough):
+    # Returning after the first page is ready would rank whichever page loads
+    # fastest against bare snippets, instead of the page that answers.
+    client.app.state.pages = pages = FakePages({})
+    client.post("/search", json={"query": "who is vice president", "max_results": max_results})
+    assert pages.enough == [enough]
 
 
 def test_search_validation_and_no_results(client, monkeypatch):
