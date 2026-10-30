@@ -3,7 +3,7 @@
 **Self-hosted web search for LLMs and AI agents. Answer-first passages, no paid search API.**
 
 [![Tests](https://github.com/ivipinmishra/openscour/actions/workflows/tests.yml/badge.svg)](https://github.com/ivipinmishra/openscour/actions/workflows/tests.yml)
-[![Release](https://img.shields.io/github/v/release/ivipinmishra/openscour?sort=semver)](https://github.com/ivipinmishra/openscour/releases)
+[![Release](https://img.shields.io/badge/release-v0.3.0-orange)](https://github.com/ivipinmishra/openscour/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![Docker](https://img.shields.io/badge/docker-compose-2496ED.svg)](docker-compose.yml)
