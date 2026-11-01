@@ -24,6 +24,21 @@ CHUNK_WORDS = 90
 
 _MONTH = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
 _NUMBER_WORD = r"(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|dozen|hundred|thousand|million|billion|trillion)"
+# Units of length, area, mass and speed, for "how tall/far/heavy..." questions.
+_UNIT = (
+    r"(?:km|kilomet(?:er|re)s?|m|met(?:er|re)s?|cm|centimet(?:er|re)s?|mm|millimet(?:er|re)s?|ft|feet|foot|"
+    r"inch(?:es)?|mi|miles?|yards?|yd|nautical miles?|light[- ]years?|au|astronomical units?|"
+    r"km²|km2|m²|sq(?:uare)? (?:km|kilomet(?:er|re)s|miles?|met(?:er|re)s|feet|ft)|acres?|hectares?|"
+    r"kg|kilograms?|grams?|tonnes?|tons?|lbs?|pounds?|ounces?|oz|"
+    r"mph|km/h|kph|knots?|m/s|storeys?|stories)"
+)
+# A number with a unit: "330 metres", "1,083 ft", "8,848.86 m", "100–110 tonnes", "384,400 km".
+_MEASUREMENT = re.compile(
+    rf"\b\d[\d,.]*(?:\s?(?:-|–|to)\s?\d[\d,.]*)?\s?(?:(?:thousand|million|billion) )?{_UNIT}(?![\w])",
+    re.I,
+)
+# "latest Python release", "what is the current version of Node.js"
+_VERSION = re.compile(r"\b[vV]?\d+\.\d+(?:\.\d+)?\b")
 
 # What kind of text answers a question, keyed by how the question starts.
 INTENTS: list[tuple[re.Pattern, re.Pattern]] = [
@@ -35,32 +50,83 @@ INTENTS: list[tuple[re.Pattern, re.Pattern]] = [
         ),
     ),
     (
-        re.compile(r"^\s*(how (many|much|tall|long|far|old|big|high|deep|large|fast|heavy)\b|what is the (population|price|cost|size)\b)", re.I),
+        # Measurements need a unit: in "How tall is the Eiffel Tower?", "completed
+        # in 1889" has a number but "330 metres" is the answer.
+        re.compile(
+            r"^\s*(how (tall|long|far|big|high|deep|large|fast|heavy|wide|thick)\b|"
+            r"what is the (height|length|distance|depth|weight|area|speed|width|size)\b)",
+            re.I,
+        ),
+        _MEASUREMENT,
+    ),
+    (
+        re.compile(r"^\s*(how (many|much|old)\b|what is the (population|price|cost)\b)", re.I),
         re.compile(rf"\d|\b{_NUMBER_WORD}\b", re.I),
     ),
     (
-        # "latest Python release", "what is the current version of Node.js"
         re.compile(r"\b(latest|current|newest)\b.*\b(version|release)s?\b", re.I),
-        re.compile(r"\b[vV]?\d+\.\d+(?:\.\d+)?\b"),
+        _VERSION,
     ),
     (
         re.compile(r"^\s*who\b", re.I),
-        # "Barack Obama", "John F. Kennedy", "JD Vance", "J. D. Vance"
-        re.compile(r"\b(?:[A-Z][a-z]+|[A-Z]{1,2}\.?(?: [A-Z]\.)?)(?: [A-Z]\.)? [A-Z][a-z]+\b"),
+        # "Barack Obama", "John F. Kennedy", "JD Vance", "J. D. Vance". Function
+        # words can't be part of a name: "Responsibilities The Prime Minister" is a
+        # heading running into a sentence.
+        re.compile(
+            r"\b(?:[A-Z][a-z]+|[A-Z]{1,2}\.?(?: [A-Z]\.)?)(?: [A-Z]\.)? "
+            r"(?!(?:The|A|An|And|Of|In|On|For|To|At|By|With|From)\b)[A-Z][a-z]+\b"
+        ),
     ),
 ]
 
 # "Who is the X?" asks about the present holder, not the history of the office.
 PRESENT_TENSE = re.compile(r"^\s*(who|what) (is|are)\b", re.I)
 # Only explicit cues: "since" and recent years also appear in history ("Since the
-# 1830s…", "Kamala Harris, 2021-2025") and promoted former officeholders.
-CURRENT = re.compile(r"\b(current(ly)?|incumbent|latest stable)\b", re.I)
+# 1830s…", "Kamala Harris, 2021-2025") and promoted former officeholders. The cue
+# must say who holds the office now ("X is the current...", "The current ... is X"):
+# "nominees are current or former senators" uses the word but names no holder.
+CURRENT = re.compile(
+    r"\b(?:is|has been|serves as|became)\b[^.;]{0,50}\b(?:current(?:ly)?|incumbent)\b"
+    r"|\b(?:current(?:ly)?|incumbent)\b[^.;]{0,60}\b(?:is|was elected|took office)\b"
+    r"|\bcurrently (?:serves|serving|holds|leads)\b"
+    r"|\blatest stable\b",
+    re.I,
+)
 
 # Forms of address that look like "Firstname Lastname" to the name pattern.
 HONORIFICS = frozenset(
     """mr mrs ms dr sir madam his her their the honorable excellency majesty highness
     president senator governor speaker justice""".split()
 )
+
+# Capitalised words that make "United States" or "House Commons" look like a person's name.
+NOT_NAMES = frozenset(
+    """united states kingdom america american britain british house commons lords senate congress
+    government parliament party labour conservative republican democratic national federal supreme
+    court cabinet office department council union european minister prime vice chief executive
+    officer secretary general state republic""".split()
+)
+
+# Words that name what a measurement question asks about, so "an elevation of
+# 8,849 m" beats "70 m below the summit" for "How high is Mount Everest?".
+DIMENSIONS: list[tuple[re.Pattern, re.Pattern]] = [
+    (re.compile(r"\bhow (tall|high)\b|\bheight\b", re.I), re.compile(r"\b(tall|high|height|elevation|altitude|above sea level|stands)\b", re.I)),
+    (re.compile(r"\bhow long\b|\blength\b", re.I), re.compile(r"\b(long|length|stretches|spans|extends)\b", re.I)),
+    (re.compile(r"\bhow far\b|\bdistance\b", re.I), re.compile(r"\b(far|distance|away|from)\b", re.I)),
+    (re.compile(r"\bhow deep\b|\bdepth\b", re.I), re.compile(r"\b(deep|depth|below sea level|deepest)\b", re.I)),
+    (re.compile(r"\bhow heavy\b|\bweight\b", re.I), re.compile(r"\b(heavy|weigh|weighs|weight|mass)\b", re.I)),
+    (re.compile(r"\bhow (big|large)\b|\b(size|area)\b", re.I), re.compile(r"\b(big|large|size|area|covers|spans)\b", re.I)),
+    (re.compile(r"\bhow fast\b|\bspeed\b", re.I), re.compile(r"\b(fast|speed|speeds|velocity|top speed)\b", re.I)),
+    (re.compile(r"\bhow (wide|thick)\b|\b(width|thickness)\b", re.I), re.compile(r"\b(wide|width|thick|thickness|across)\b", re.I)),
+]
+
+
+def dimension_pattern(query: str) -> re.Pattern | None:
+    for question, words in DIMENSIONS:
+        if question.search(query):
+            return words
+    return None
+
 
 # Navigation, references and other page chrome that matches keywords but answers nothing.
 BOILERPLATE = re.compile(
@@ -127,7 +193,7 @@ def answer_strength(answer: re.Pattern, sentence: str, query: set[str]) -> int:
     best = 0
     for m in answer.finditer(sentence):
         words = set(_words(m.group(0)))
-        if words - query - HONORIFICS - STOPWORDS:
+        if words - query - HONORIFICS - NOT_NAMES - STOPWORDS:
             best = max(best, 1 if _BARE_YEAR.fullmatch(m.group(0)) else 2)
     return best
 
@@ -137,7 +203,9 @@ def _answer_sentences(chunk: str) -> list[str]:
     return [s for s in _SENTENCE_END.split(chunk) if not s.rstrip().endswith("?")]
 
 
-def answer_first(chunk: str, query: set[str], answer: re.Pattern | None, present: bool) -> str:
+def answer_first(
+    chunk: str, query: set[str], answer: re.Pattern | None, present: bool, dimension: re.Pattern | None = None
+) -> str:
     """Trim leading sentences so the passage starts at its best answering sentence."""
     if answer is None:
         return chunk
@@ -147,7 +215,9 @@ def answer_first(chunk: str, query: set[str], answer: re.Pattern | None, present
         if s.rstrip().endswith("?") or not query & set(tokenize(s)):
             return 0
         strength = answer_strength(answer, s, query)
-        return strength + (1 if strength and present and CURRENT.search(s) else 0)
+        if not strength:
+            return 0
+        return strength + (1 if present and CURRENT.search(s) else 0) + (1 if dimension and dimension.search(s) else 0)
 
     best = max(range(len(sentences)), key=lambda i: quality(sentences[i]))
     if quality(sentences[best]) == 0:
@@ -162,6 +232,7 @@ def chunk_multiplier(
     title: set[str],
     answer: re.Pattern | None,
     present: bool = False,
+    dimension: re.Pattern | None = None,
 ) -> float:
     m = 1.0
     # Pages tend to state the key fact near the top.
@@ -184,6 +255,8 @@ def chunk_multiplier(
             m *= 1.6 if max(k for k, _ in near) == 2 else 1.3
             if present and any(CURRENT.search(s) for _, s in near):
                 m *= 2.0
+            if dimension and any(dimension.search(s) for _, s in near):
+                m *= 1.4
         elif answering:
             m *= 1.1
         else:
@@ -334,7 +407,8 @@ def rank(query: str, docs: list[Doc], chunks_per_doc: int) -> list[Ranked]:
     if not docs:
         return []
     answer = answer_pattern(query)
-    version_question = answer is not None and answer.pattern == INTENTS[2][1].pattern
+    dimension = dimension_pattern(query) if answer is _MEASUREMENT else None
+    version_question = answer is _VERSION
     present = bool(PRESENT_TENSE.search(query)) or version_question
     # Factual questions have their own answer-shaped scoring; topic searches
     # ("Latest AWS Bedrock updates") get topic coverage and freshness instead.
@@ -365,7 +439,7 @@ def rank(query: str, docs: list[Doc], chunks_per_doc: int) -> list[Ranked]:
         s = bm25.score(q, i)
         if s:
             chunk = docs[di].chunks[ci]
-            s *= chunk_multiplier(chunk, ci, qset, titles[di], answer, present)
+            s *= chunk_multiplier(chunk, ci, qset, titles[di], answer, present, dimension)
             if topic_search:
                 s *= topic_multiplier(set(corpus[i]), topic, entities)
                 if is_heading_list(chunk):
@@ -393,7 +467,7 @@ def rank(query: str, docs: list[Doc], chunks_per_doc: int) -> list[Ranked]:
         Ranked(
             doc=docs[di],
             score=round(s / top_score, 4),
-            content=" … ".join(answer_first(docs[di].chunks[ci], qset, answer, present) for ci in cis),
+            content=" … ".join(answer_first(docs[di].chunks[ci], qset, answer, present, dimension) for ci in cis),
         )
         for s, di, cis in raw
     ]

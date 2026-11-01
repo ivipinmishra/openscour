@@ -137,6 +137,10 @@ def test_question_headings_are_not_answers():
 def test_intents_and_joined_terms():
     assert answer_pattern("When did WW2 end?").search("It ended in 1945")
     assert answer_pattern("How tall is the Eiffel Tower?").search("330 metres")
+    assert answer_pattern("How tall is the Eiffel Tower?").search("1,083 ft")
+    assert not answer_pattern("How tall is the Eiffel Tower?").search("Completed in March 1889")
+    assert answer_pattern("How heavy is a blue whale?").search("between 100-200 tons")
+    assert answer_pattern("How many moons does Mars have?").search("two moons")
     assert answer_pattern("Who founded SpaceX?").search("founded by Elon Musk")
     assert answer_pattern("What is RAG?") is None
     assert "midterm" in query_terms("mid term election")
@@ -249,3 +253,53 @@ def test_relevant_passages_falls_back_to_page_start_when_nothing_matches():
 
     page = "Opening paragraph about gardening.\nSecond paragraph about soil."
     assert relevant_passages("quantum computing", page, max_passages=1).startswith("Opening paragraph")
+
+
+def test_measurement_question_needs_a_unit_and_prefers_the_asked_dimension():
+    # Any number used to count as an answer, so a construction date won.
+    dated = "Completed in March 1889, the Eiffel Tower was the entrance arch to the World's Fair."
+    measured = "The Eiffel Tower is 330 metres (1,083 ft) tall, the tallest structure in Paris."
+    docs = [
+        Doc(url="https://dated.com", title="Eiffel Tower", text=dated, rank=0),
+        Doc(url="https://measured.com", title="Eiffel Tower", text=measured, rank=1),
+    ]
+    assert rank("How tall is the Eiffel Tower?", docs, chunks_per_doc=1)[0].doc.url == "https://measured.com"
+
+    # Both have a measurement next to the question's words; only one is a height.
+    below = "This rock bed crops out about 70 m (230 ft) below the summit of Mount Everest."
+    elevation = "Mount Everest reaches an elevation of 8,849 m (29,032 ft) above sea level."
+    docs = [
+        Doc(url="https://geology.com", title="Mount Everest", text=below, rank=0),
+        Doc(url="https://height.com", title="Mount Everest", text=elevation, rank=1),
+    ]
+    assert rank("How high is Mount Everest?", docs, chunks_per_doc=1)[0].doc.url == "https://height.com"
+
+
+def test_who_is_ignores_place_names_and_loose_current():
+    # "United States" isn't a person, and "current or former senators" names no holder.
+    criteria = (
+        "### Selection criteria Though the vice president needs no political experience, most vice president "
+        "nominees are current or former United States senators. A vice president is often chosen to balance "
+        "the ticket, and the vice president must meet the same requirements as the president."
+    )
+    holder = "JD Vance is the 50th and current vice president since January 20, 2025."
+    docs = [
+        Doc(url="https://criteria.com", title="Vice President of the United States", text=criteria, rank=0),
+        Doc(url="https://holder.com", title="Vice President of the United States", text=holder, rank=1),
+    ]
+    assert rank("who is the US vice president", docs, chunks_per_doc=1)[0].doc.url == "https://holder.com"
+
+
+def test_heading_running_into_a_sentence_is_not_a_name():
+    # "Responsibilities The" looked like "Firstname Lastname".
+    duties = (
+        "# Prime Minister ## Responsibilities The Prime Minister is the leader of the UK government and "
+        "is responsible for its policy and decisions. The Prime Minister oversees the civil service, and the "
+        "Prime Minister appoints ministers. The Prime Minister is the UK's principal government figure."
+    )
+    news = "Andy Burnham has become UK prime minister, replacing Sir Keir Starmer in Downing Street."
+    docs = [
+        Doc(url="https://duties.com", title="Prime Minister", text=duties, rank=0),
+        Doc(url="https://news.com", title="New prime minister", text=news, rank=1),
+    ]
+    assert rank("Who is the prime minister of the UK?", docs, chunks_per_doc=1)[0].doc.url == "https://news.com"
