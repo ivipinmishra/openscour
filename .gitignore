@@ -18,6 +18,5 @@ build/
 .idea/
 .vscode/
 
-# Project website, kept out of this repository
+# Project website: its own repository (openscour-website)
 website/
-netlify.toml

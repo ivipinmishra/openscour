@@ -2,7 +2,9 @@
 
 All notable changes to OpenScour are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.0] - 2026-11-01
+
+Search engine proxies, engines chosen by measurement, engine health reporting, and better answers for small searches.
 
 ### Search engines
 - SearXNG uses Brave, Bing and Yahoo for web results, and Brave News, Bing News and Wikinews for news. In measurements, Google, DuckDuckGo, Qwant and Google CSE blocked almost every automated query, so they are off, along with translation and currency engines that don't return web pages.
@@ -92,6 +94,7 @@ First release.
 ### MCP server
 - `openscour-mcp` gives AI agents read-only `search` and `extract` tools, with setup instructions for Claude Code, Kiro, Cursor, Claude Desktop and VS Code.
 
+[0.4.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.4.0
 [0.3.1]: https://github.com/ivipinmishra/openscour/releases/tag/v0.3.1
 [0.3.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.3.0
 [0.2.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.2.0

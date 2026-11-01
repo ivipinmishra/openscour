@@ -75,7 +75,7 @@ async def lifespan(app: FastAPI):
     shutdown_extractors()
 
 
-app = FastAPI(title="OpenScour", version="0.3.1", lifespan=lifespan)
+app = FastAPI(title="OpenScour", version="0.4.0", lifespan=lifespan)
 bearer = HTTPBearer(auto_error=False)
 
 # Request IDs from callers are echoed back only if they are short and plain.
