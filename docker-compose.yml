@@ -30,11 +30,32 @@ services:
     # and set API_KEYS (see "Deploying" in the README).
     ports:
       - "127.0.0.1:8000:8000"
+    # Settings from .env or the shell (see .env.example). A name without a value
+    # is passed only when it's set, so the server's own default applies otherwise.
     environment:
       - SEARXNG_URL=http://searxng:8080
-      - API_KEYS=${API_KEYS:-}
-      - ANSWER_PROVIDER=${ANSWER_PROVIDER:-none}
-      - SEARCH_PROXIES=${SEARCH_PROXIES:-}
+      - API_KEYS
+      - ANSWER_PROVIDER
+      - ANSWER_MODEL
+      - AWS_REGION
+      - DUCKDUCKGO_FALLBACK
+      - SEARCH_PROXIES
+      - FETCH_TIMEOUT
+      - FETCH_CONCURRENCY
+      - EXTRACT_WORKERS
+      - BASIC_FETCH_DEADLINE
+      - MAX_PAGE_BYTES
+      - MAX_PDF_BYTES
+      - PDF_MAX_PAGES
+      - CACHE_TTL_SECONDS
+      - MAX_INFLIGHT_FETCHES
+      - EXTRACT_MAX_TASKS_PER_CHILD
+      - USER_AGENT
+      - RESPECT_ROBOTS_TXT
+      - ALLOW_PRIVATE_NETWORK_FETCHES
+      - RATE_LIMIT_PER_MINUTE
+      - DAILY_QUOTA_PER_KEY
+      - TRUST_FORWARDED_FOR
     read_only: true
     tmpfs:
       # Extraction worker processes need a writable /tmp for their semaphores.

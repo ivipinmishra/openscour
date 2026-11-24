@@ -1,7 +1,7 @@
-from openscour.server.fetcher import strip_back_matter
-from openscour.server.providers import RawResult, filter_results
 from datetime import date
 
+from openscour.server.fetcher import strip_back_matter
+from openscour.server.providers import RawResult, filter_results
 from openscour.server.ranker import (
     Doc,
     answer_pattern,
@@ -98,7 +98,12 @@ def test_who_is_prefers_current_holder_and_starts_at_answer():
 def test_full_date_beats_bare_year():
     docs = [
         Doc(url="https://year.com", title="Elections", text="Don't miss the important 2026 midterm elections.", rank=0),
-        Doc(url="https://date.com", title="Elections", text="The 2026 midterm election will be held on Tuesday, November 3.", rank=1),
+        Doc(
+            url="https://date.com",
+            title="Elections",
+            text="The 2026 midterm election will be held on Tuesday, November 3.",
+            rank=1,
+        ),
     ]
     assert rank("When is the midterm election?", docs, chunks_per_doc=1)[0].doc.url == "https://date.com"
 
@@ -161,11 +166,15 @@ def test_boilerplate_passage_is_demoted():
 
 def test_relevant_page_ranks_first():
     docs = [
-        Doc(url="https://a.com", title="Cooking pasta", text="Boil water. Add salt. Cook pasta for ten minutes.", rank=0),
+        Doc(
+            url="https://a.com", title="Cooking pasta", text="Boil water. Add salt. Cook pasta for ten minutes.", rank=0
+        ),
         Doc(
             url="https://b.com",
             title="BM25 explained",
-            text="BM25 is a ranking function. BM25 scores documents using term frequency and inverse document frequency.",
+            text=(
+                "BM25 is a ranking function. BM25 scores documents using term frequency and inverse document frequency."
+            ),
             rank=1,
         ),
     ]
@@ -207,7 +216,9 @@ def test_table_of_contents_is_demoted_for_topic_searches():
     )
     assert is_heading_list(toc)
     assert not is_heading_list(advice)
-    assert not is_heading_list("- Oct. 9: Voter registration deadline. - Oct. 15: Early voting begins. - Nov. 3: Election day.")
+    assert not is_heading_list(
+        "- Oct. 9: Voter registration deadline. - Oct. 15: Early voting begins. - Nov. 3: Election day."
+    )
     docs = [
         Doc(url="https://toc.example", title="RAG chunking strategies", text=toc, rank=0),
         Doc(url="https://advice.example", title="RAG chunking strategies", text=advice, rank=1),
@@ -325,7 +336,8 @@ def test_how_many_prefers_a_count_beside_the_counted_thing():
 def test_how_many_ignores_measurements():
     sizes = (
         "Deimos, the smaller of the moons of Mars, is about 12 kilometers across. The moons of Mars orbit "
-        "close: Deimos circles Mars at 23,460 kilometers, and Phobos, the larger of the Mars moons, at 6,000 kilometers."
+        "close: Deimos circles Mars at 23,460 kilometers, and Phobos, the larger of the Mars moons, "
+        "at 6,000 kilometers."
     )
     count = "Mars has two small moons, Phobos and Deimos, both probably captured asteroids."
     docs = [
@@ -341,3 +353,69 @@ def test_counted_words():
     assert counted_words("How many attention heads does the Transformer use?") == {"attention", "head"}
     assert counted_words("How many countries are in the European Union?") == {"country"}
     assert counted_words("How much does a Tesla cost?") is None
+
+
+def test_paper_passage_starts_at_the_abstract():
+    paper = (
+        "Provided proper attribution is provided, Google hereby grants permission to reproduce the tables.\n"
+        "Attention Is All You Need Ashish Vaswani Google Brain avaswani@google.com Noam Shazeer Google Brain "
+        "noam@google.com Abstract The dominant sequence transduction models are based on complex recurrent "
+        "networks. We propose a new simple network architecture, the Transformer, based solely on attention."
+    )
+    doc = Doc(url="https://arxiv.org/pdf/1706.03762", title="Attention Is All You Need", text=paper, rank=0)
+    top = rank("Attention Is All You Need transformer paper", [doc], chunks_per_doc=1)[0]
+    assert top.content.startswith("Abstract The dominant sequence transduction models")
+    # The full text keeps the title and authors; only the shown passage starts later.
+    assert "Ashish Vaswani" in doc.text
+
+
+def test_initials_do_not_end_sentences():
+    # "Daniel M. Ziegler" used to split, cutting an author list off from its abstract.
+    from openscour.server.ranker import _SENTENCE_END
+
+    assert _SENTENCE_END.split("John F. Kennedy was president. Daniel M. Ziegler wrote it.") == [
+        "John F. Kennedy was president.",
+        "Daniel M. Ziegler wrote it.",
+    ]
+
+
+def test_when_is_ignores_label_years_and_past_dates(monkeypatch):
+    from openscour.server import ranker
+
+    monkeypatch.setattr(ranker, "this_year", lambda: 2026)
+    see_also = (
+        "## See also - 2028 Summer Paralympics - Olympic Games held in the United States - "
+        "1904 Summer Olympics in St. Louis - 1932 Summer Olympics in Los Angeles - 1984 Summer Olympics"
+    )
+    proposal = (
+        "On December 9, 2021, the IOC board proposed that skateboarding and surfing, which debuted at the "
+        "2020 Summer Olympics, be added to the program of the 2028 Summer Olympics."
+    )
+    dates = (
+        "The 2028 Summer Olympics Opening Ceremony is set for July 14, 2028, with the Summer Olympics "
+        "running through July 30, 2028 in Los Angeles."
+    )
+    docs = [
+        Doc(url="https://see-also.com", title="2028 Summer Olympics", text=see_also, rank=0),
+        Doc(url="https://proposal.com", title="2028 Summer Olympics", text=proposal, rank=1),
+        Doc(url="https://dates.com", title="LA28 Games dates", text=dates, rank=2),
+    ]
+    assert rank("When are the 2028 Summer Olympics?", docs, chunks_per_doc=1)[0].doc.url == "https://dates.com"
+
+
+def test_when_was_still_accepts_past_years():
+    docs = [
+        Doc(
+            url="https://a.com",
+            title="Python",
+            text="Python is a popular language used for data science and the web.",
+            rank=0,
+        ),
+        Doc(
+            url="https://b.com",
+            title="Python",
+            text="Van Rossum first released Python in 1991 as version 0.9.0.",
+            rank=1,
+        ),
+    ]
+    assert rank("When was Python first released?", docs, chunks_per_doc=1)[0].doc.url == "https://b.com"

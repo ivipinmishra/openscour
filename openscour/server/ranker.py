@@ -12,7 +12,9 @@ _WORD = re.compile(r"[^\W_]+(?:'[^\W_]+)?")
 # Chinese, Japanese and Korean are written without spaces between words, so a
 # "word" match is a whole phrase; those runs are indexed as overlapping character pairs.
 _CJK_RUN = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af\uf900-\ufaff]+")
-_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+# A period after a lone capital is an initial, not a sentence end: "John F. Kennedy",
+# "Daniel M. Ziegler".
+_SENTENCE_END = re.compile(r"(?<=[.!?])(?<![\s(][A-Z]\.)\s+")
 
 STOPWORDS = frozenset(
     """a an and are as at be but by for from has have how i in is it its of on or
@@ -22,8 +24,14 @@ STOPWORDS = frozenset(
 
 CHUNK_WORDS = 90
 
-_MONTH = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
-_NUMBER_WORD = r"(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|dozen|hundred|thousand|million|billion|trillion)"
+_MONTH = (
+    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|"
+    r"sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+)
+_NUMBER_WORD = (
+    r"(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+    r"dozen|hundred|thousand|million|billion|trillion)"
+)
 # Units of length, area, mass and speed, for "how tall/far/heavy..." questions.
 _UNIT = (
     r"(?:km|kilomet(?:er|re)s?|m|met(?:er|re)s?|cm|centimet(?:er|re)s?|mm|millimet(?:er|re)s?|ft|feet|foot|"
@@ -47,7 +55,8 @@ INTENTS: list[tuple[re.Pattern, re.Pattern]] = [
     (
         re.compile(r"^\s*(when\b|what (year|date|day|month|time)\b|which (year|date|day)\b)", re.I),
         re.compile(
-            rf"\b{_MONTH}\.? \d{{1,2}}\b|\b\d{{1,2}} {_MONTH}\b|\b(1[0-9]|20)\d{{2}}\b|\b\d{{1,2}}/\d{{1,2}}/\d{{2,4}}\b",
+            rf"\b{_MONTH}\.? \d{{1,2}}\b|\b\d{{1,2}} {_MONTH}\b|\b(1[0-9]|20)\d{{2}}\b|"
+            r"\b\d{1,2}/\d{1,2}/\d{2,4}\b",
             re.I,
         ),
     ),
@@ -112,14 +121,23 @@ NOT_NAMES = frozenset(
 # Words that name what a measurement question asks about, so "an elevation of
 # 8,849 m" beats "70 m below the summit" for "How high is Mount Everest?".
 DIMENSIONS: list[tuple[re.Pattern, re.Pattern]] = [
-    (re.compile(r"\bhow (tall|high)\b|\bheight\b", re.I), re.compile(r"\b(tall|high|height|elevation|altitude|above sea level|stands)\b", re.I)),
+    (
+        re.compile(r"\bhow (tall|high)\b|\bheight\b", re.I),
+        re.compile(r"\b(tall|high|height|elevation|altitude|above sea level|stands)\b", re.I),
+    ),
     (re.compile(r"\bhow long\b|\blength\b", re.I), re.compile(r"\b(long|length|stretches|spans|extends)\b", re.I)),
     (re.compile(r"\bhow far\b|\bdistance\b", re.I), re.compile(r"\b(far|distance|away|from)\b", re.I)),
     (re.compile(r"\bhow deep\b|\bdepth\b", re.I), re.compile(r"\b(deep|depth|below sea level|deepest)\b", re.I)),
     (re.compile(r"\bhow heavy\b|\bweight\b", re.I), re.compile(r"\b(heavy|weigh|weighs|weight|mass)\b", re.I)),
-    (re.compile(r"\bhow (big|large)\b|\b(size|area)\b", re.I), re.compile(r"\b(big|large|size|area|covers|spans)\b", re.I)),
+    (
+        re.compile(r"\bhow (big|large)\b|\b(size|area)\b", re.I),
+        re.compile(r"\b(big|large|size|area|covers|spans)\b", re.I),
+    ),
     (re.compile(r"\bhow fast\b|\bspeed\b", re.I), re.compile(r"\b(fast|speed|speeds|velocity|top speed)\b", re.I)),
-    (re.compile(r"\bhow (wide|thick)\b|\b(width|thickness)\b", re.I), re.compile(r"\b(wide|width|thick|thickness|across)\b", re.I)),
+    (
+        re.compile(r"\bhow (wide|thick)\b|\b(width|thickness)\b", re.I),
+        re.compile(r"\b(wide|width|thick|thickness|across)\b", re.I),
+    ),
 ]
 
 
@@ -231,7 +249,7 @@ def query_terms(query: str, vocabulary: set[str] | None = None) -> list[str]:
     own, "term" would match unrelated text like "presidential term".
     """
     tokens = tokenize(query)
-    joined = [(a, b, a + b) for a, b in zip(tokens, tokens[1:])]
+    joined = [(a, b, a + b) for a, b in zip(tokens, tokens[1:], strict=False)]
     if vocabulary is None:
         return tokens + [j for _, _, j in joined]
     drop = {t for a, b, j in joined if j in vocabulary for t in (a, b)}
@@ -246,10 +264,19 @@ def answer_pattern(query: str) -> re.Pattern | None:
 
 
 _BARE_YEAR = re.compile(r"(1[0-9]|20)\d{2}")
+_NEXT_WORD = re.compile(r"[\s*_]+([^\W_]+)")
+# The year right after a month and day: "December 9, 2021".
+_YEAR_AFTER = re.compile(r",?\s*((?:1[0-9]|20)\d{2})\b")
+# "When is/are ...?" asks about now or later; "when was/did" about the past.
+UPCOMING = re.compile(r"^\s*when (is|are)\b", re.I)
 
 
 def answer_strength(
-    answer: re.Pattern, sentence: str, query: set[str], counted: frozenset[str] | None = None
+    answer: re.Pattern,
+    sentence: str,
+    query: set[str],
+    counted: frozenset[str] | None = None,
+    not_before: int | None = None,
 ) -> int:
     """0 = no answer, 1 = vague answer (a bare year), 2 = specific answer.
 
@@ -261,8 +288,21 @@ def answer_strength(
     best = 0
     for m in answer.finditer(sentence):
         words = set(_words(m.group(0)))
-        if words - query - HONORIFICS - NOT_NAMES - STOPWORDS:
-            best = max(best, 1 if _BARE_YEAR.fullmatch(m.group(0)) else 2)
+        if not words - query - HONORIFICS - NOT_NAMES - STOPWORDS:
+            continue
+        if _BARE_YEAR.fullmatch(m.group(0)):
+            # A year naming the topic is a label, not the answer: "the 2026 midterm
+            # elections", "1904 Summer Olympics".
+            following = _NEXT_WORD.match(sentence, m.end())
+            if following and set(_words(following.group(1))) & query:
+                continue
+            if not_before and int(m.group(0)) < not_before:
+                continue
+            best = max(best, 1)
+        else:
+            # "When are the 2028 Olympics?": "December 9, 2021" is a date, but past.
+            year = _YEAR_AFTER.match(sentence, m.end())
+            best = max(best, 1 if not_before and year and int(year.group(1)) < not_before else 2)
     return best
 
 
@@ -278,6 +318,7 @@ def answer_first(
     present: bool,
     dimension: re.Pattern | None = None,
     counted: frozenset[str] | None = None,
+    not_before: int | None = None,
 ) -> str:
     """Trim leading sentences so the passage starts at its best answering sentence."""
     if answer is None:
@@ -287,7 +328,7 @@ def answer_first(
     def quality(s: str) -> int:
         if s.rstrip().endswith("?") or not query & set(tokenize(s)):
             return 0
-        strength = answer_strength(answer, s, query, counted)
+        strength = answer_strength(answer, s, query, counted, not_before)
         if not strength:
             return 0
         return strength + (1 if present and CURRENT.search(s) else 0) + (1 if dimension and dimension.search(s) else 0)
@@ -307,6 +348,7 @@ def chunk_multiplier(
     present: bool = False,
     dimension: re.Pattern | None = None,
     counted: frozenset[str] | None = None,
+    not_before: int | None = None,
 ) -> float:
     m = 1.0
     # Pages tend to state the key fact near the top.
@@ -320,7 +362,7 @@ def chunk_multiplier(
         m *= 0.75 ** min(hits, 6)
 
     if answer is not None:
-        strengths = [(answer_strength(answer, s, query, counted), s) for s in _answer_sentences(chunk)]
+        strengths = [(answer_strength(answer, s, query, counted, not_before), s) for s in _answer_sentences(chunk)]
         answering = [(k, s) for k, s in strengths if k]
         near = [(k, s) for k, s in answering if query & set(tokenize(s))]
         if near:
@@ -425,13 +467,7 @@ def wants_fresh(query: str) -> bool:
 def entity_terms(query: str) -> set[str]:
     """Capitalised words after the first, e.g. "AWS" and "Bedrock" in "Latest AWS Bedrock updates"."""
     words = re.findall(r"[A-Za-z0-9][\w.+-]*", query)[1:]
-    return {
-        t
-        for w in words
-        if w[0].isupper()
-        for t in tokenize(w)
-        if t not in FRESHNESS_WORDS
-    }
+    return {t for w in words if w[0].isupper() for t in tokenize(w) if t not in FRESHNESS_WORDS}
 
 
 def recency_multiplier(text: str, published: str | None = None) -> float:
@@ -483,6 +519,7 @@ def rank(query: str, docs: list[Doc], chunks_per_doc: int) -> list[Ranked]:
     answer = answer_pattern(query)
     dimension = dimension_pattern(query) if answer is _MEASUREMENT else None
     counted = counted_words(query) if answer is _COUNT else None
+    not_before = this_year() if UPCOMING.search(query) else None
     version_question = answer is _VERSION
     present = bool(PRESENT_TENSE.search(query)) or version_question
     # Factual questions have their own answer-shaped scoring; topic searches
@@ -514,7 +551,7 @@ def rank(query: str, docs: list[Doc], chunks_per_doc: int) -> list[Ranked]:
         s = bm25.score(q, i)
         if s:
             chunk = docs[di].chunks[ci]
-            s *= chunk_multiplier(chunk, ci, qset, titles[di], answer, present, dimension, counted)
+            s *= chunk_multiplier(chunk, ci, qset, titles[di], answer, present, dimension, counted, not_before)
             if topic_search:
                 s *= topic_multiplier(set(corpus[i]), topic, entities)
                 if is_heading_list(chunk):
@@ -543,13 +580,32 @@ def rank(query: str, docs: list[Doc], chunks_per_doc: int) -> list[Ranked]:
             doc=docs[di],
             score=round(s / top_score, 4),
             content=" … ".join(
-                answer_first(docs[di].chunks[ci], qset, answer, present, dimension, counted) for ci in cis
+                (skip_front_matter(passage) if ci == 0 else passage)
+                for ci in cis
+                for passage in [
+                    answer_first(docs[di].chunks[ci], qset, answer, present, dimension, counted, not_before)
+                ]
             ),
         )
         for s, di, cis in raw
     ]
     out.sort(key=lambda r: r.score, reverse=True)
     return out
+
+
+# A paper's first passage carries its title, authors, emails and notices before
+# the abstract: "Attention Is All You Need Ashish Vaswani Google Brain ... Abstract The ...".
+_ABSTRACT_START = re.compile(r"\bAbstract[.:—-]?\s+(?=[A-Z])")
+
+
+def skip_front_matter(passage: str) -> str:
+    """Start a document's first passage at its abstract, when it has one.
+
+    Only the shown text changes: the title words before it still count for
+    ranking, which is how the passage was found.
+    """
+    m = _ABSTRACT_START.search(passage, 1, 2000)
+    return passage[m.start() :] if m else passage
 
 
 PASSAGE_SEPARATOR = "\n\n…\n\n"

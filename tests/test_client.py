@@ -5,9 +5,9 @@ import pytest
 
 from openscour import (
     APIConnectionError,
+    APIStatusError,
     AsyncOpenScour,
     AuthenticationError,
-    APIStatusError,
     NoResultsError,
     OpenScour,
     RateLimitError,
@@ -125,7 +125,6 @@ def test_extract_with_query_sends_query_and_passage_count():
     }
 
 
-
 @pytest.fixture
 def waits(monkeypatch):
     """Records retry waits instead of sleeping."""
@@ -220,3 +219,12 @@ async def test_async_client_retries(waits):
         response = await client.search("x")
     assert response.query == "Latest AWS Bedrock updates"
     assert len(seen) == 2 and len(waits) == 1
+
+
+def test_search_sends_language_and_engines_only_when_set():
+    from openscour.client import _search_body
+
+    plain = _search_body("q", "basic", "general", 5, False, False, None, None, None)
+    assert "language" not in plain and "engines" not in plain
+    body = _search_body("q", "basic", "general", 5, False, False, None, None, None, "de-DE", ["bing"])
+    assert body["language"] == "de-DE" and body["engines"] == ["bing"]

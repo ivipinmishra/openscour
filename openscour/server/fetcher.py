@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import io
 import logging
 import multiprocessing
@@ -153,7 +154,8 @@ def _extract_pdf(data: bytes) -> str:
 
 
 def _extract(html: str | bytes, ctype: str) -> str:
-    if ctype == PDF_TYPE:
+    # Only PDFs are downloaded as bytes; everything else is text.
+    if isinstance(html, bytes):
         return _extract_pdf(html)
     if ctype == "text/plain":
         return html.strip()
@@ -173,7 +175,7 @@ def _extract(html: str | bytes, ctype: str) -> str:
 async def fetch_page(client: httpx.AsyncClient, url: str, timeout: float) -> str:
     try:
         html, ctype = await asyncio.wait_for(_download(client, url, timeout), timeout + 1)
-    except (httpx.HTTPError, asyncio.TimeoutError) as e:
+    except (TimeoutError, httpx.HTTPError) as e:
         # Keep the reason for blocked addresses; for other errors the type is enough.
         reason = str(e) if str(e).startswith("blocked:") else type(e).__name__
         raise FetchError(reason) from e
@@ -183,7 +185,7 @@ async def fetch_page(client: httpx.AsyncClient, url: str, timeout: float) -> str
         text = await asyncio.wait_for(
             asyncio.get_running_loop().run_in_executor(_extract_pool(), _extract, html, ctype), timeout
         )
-    except asyncio.TimeoutError as e:
+    except TimeoutError as e:
         raise FetchError("extraction timed out") from e
     except BrokenProcessPool as e:
         # A worker died (e.g. a pathological page); start fresh workers next time.
@@ -235,7 +237,7 @@ class PageFetcher:
             return None
         task = asyncio.create_task(self._fetch(url, timeout))
         self._inflight[url] = task
-        task.add_done_callback(lambda t, url=url: self._finished(url, t))
+        task.add_done_callback(functools.partial(self._finished, url))
         return task
 
     def _finished(self, url: str, task: asyncio.Task[str]) -> None:
@@ -276,19 +278,17 @@ class PageFetcher:
                 tasks[url] = task
             else:
                 out[url] = FetchError("server busy")
-        if tasks and deadline is None:
-            await asyncio.wait(tasks.values())
-        elif tasks:
+        if tasks and deadline is not None:
             slots = [out[url] if url in out else tasks[url] for url in urls]
             await _wait_for_enough(slots, enough or len(urls), deadline)
+        elif tasks:
+            await asyncio.wait(tasks.values())
         for url, task in tasks.items():
             out[url] = task_result(task) if task.done() else FetchError("not ready before the deadline")
         return out
 
 
-async def _wait_for_enough(
-    slots: list[str | FetchError | asyncio.Task[str]], enough: int, deadline: float
-) -> None:
+async def _wait_for_enough(slots: list[str | FetchError | asyncio.Task[str]], enough: int, deadline: float) -> None:
     """Wait until the first `enough` readable slots are in, every task is done, or the deadline passes.
 
     Slots are cached text, errors, or fetches still running, best first. A

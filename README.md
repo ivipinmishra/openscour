@@ -319,6 +319,8 @@ Send `Authorization: Bearer <key>` when the server has `API_KEYS` set.
 | `time_range` | `null` | `day`, `week`, `month` or `year` |
 | `include_domains` | `[]` | Only return results from these domains |
 | `exclude_domains` | `[]` | Never return results from these domains |
+| `language` | `null` | Results in this language, optionally for a region: `de`, `de-DE`, `en-GB` |
+| `engines` | `[]` | Search only these SearXNG engines, such as `["bing"]` or `["bing news"]`, instead of the configured ones. Unknown names are rejected with `422`; there is no DuckDuckGo fallback when engines are chosen |
 | `include_raw_content` | `false` | Also include the full extracted page text |
 | `include_answer` | `false` | Generate an AI answer (needs `ANSWER_PROVIDER`, see [Configuration](#configuration)) |
 
@@ -400,7 +402,7 @@ request_id=3f9c… method=POST path=/search status=200 duration_ms=2140 cache=mi
 |---|---|
 | `401` | The API key is missing or wrong |
 | `422` | The request is invalid, for example an empty query; the body says which field |
-| `429` | Too many requests; wait the number of seconds in the `Retry-After` header |
+| `429` | Too many requests, or the key's daily quota is used up; wait the number of seconds in the `Retry-After` header |
 | `502` | No search backend returned results |
 
 ## Python client reference
@@ -421,6 +423,8 @@ response = client.search(
     topic="news",                   # "general" (default) or "news"
     max_results=10,                 # 1 to 20
     time_range="week",              # "day", "week", "month" or "year"
+    language="en-US",               # language, optionally with a region
+    engines=["bing news"],          # only these SearXNG engines
     include_domains=["aws.amazon.com"],
     exclude_domains=[],
     include_raw_content=True,       # full page text in result.raw_content
@@ -515,6 +519,7 @@ Set environment variables on the server, or copy [`.env.example`](https://github
 | `RESPECT_ROBOTS_TXT` | `true` | Skip pages a site's robots.txt disallows |
 | `ALLOW_PRIVATE_NETWORK_FETCHES` | `false` | Allow fetching pages from private addresses. See [Security](#security) before enabling |
 | `RATE_LIMIT_PER_MINUTE` | `60` | Requests per minute for each API key, or each client IP when auth is off; `0` turns the limit off |
+| `DAILY_QUOTA_PER_KEY` | `0` (off) | Requests per UTC day for each API key, or each client IP when auth is off. Responses show `X-Quota-Limit` and `X-Quota-Remaining`; past the quota, `429` until midnight UTC |
 | `TRUST_FORWARDED_FOR` | `false` | Take the client IP from `X-Forwarded-For`. Enable only behind a load balancer that sets it |
 
 Clients (the Python client and the MCP server) read `OPENSCOUR_BASE_URL` and `OPENSCOUR_API_KEY`.
@@ -559,7 +564,7 @@ When SearXNG doesn't run through Docker Compose, `SEARCH_PROXIES` only applies t
   - `ALLOW_PRIVATE_NETWORK_FETCHES=true` turns this off, for example to search an intranet. Only do that on a deployment that untrusted callers, including AI agents reading untrusted pages, cannot reach.
 - **Honest identity and robots.txt.** OpenScour identifies itself as `OpenScour/<version>` (for example `OpenScour/0.5.0`) with a link to this repository, and skips pages a site's robots.txt disallows (the `OpenScour` user-agent token, or `*`).
 - **Container hardening.** The API image runs as an unprivileged user with a read-only filesystem, no Linux capabilities and `no-new-privileges`, and has a health check. The SearXNG image is pinned to a specific release.
-- **Rate limits.** Each API key, or each client IP when auth is off, gets `RATE_LIMIT_PER_MINUTE` requests a minute, so one runaway agent can't starve other clients or get your server blocked by search engines. Limits are kept per instance.
+- **Rate limits.** Each API key, or each client IP when auth is off, gets `RATE_LIMIT_PER_MINUTE` requests a minute, so one runaway agent can't starve other clients or get your server blocked by search engines. `DAILY_QUOTA_PER_KEY` caps each key's requests per day. Limits and quotas are kept per instance.
 - **Local by default.** Docker Compose publishes both ports on `127.0.0.1` only, so nothing is reachable from other machines until you choose to expose it.
 
 ## Deploying
@@ -595,6 +600,12 @@ uv sync
 
 ```bash
 uv run pytest
+```
+
+Lint, format and type-check (CI runs these too):
+
+```bash
+uv run ruff check . && uv run ruff format --check . && uv run mypy
 ```
 
 Check answer quality against a running server (sends 10 real searches):

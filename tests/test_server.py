@@ -15,7 +15,8 @@ VP_PAGE = (
     "John Adams was the first vice president. "
     "JD Vance is the 50th and current vice president since January 20, 2025.\n"
     # A long page: extract returns 3 passages by default, which must be a small part of it.
-    + "The office has changed a great deal over two centuries. " * 120
+    + "The office has changed a great deal over two centuries. "
+    * 120
 )
 
 
@@ -115,7 +116,10 @@ def test_extract_with_query_returns_relevant_passages(client):
     client.app.state.pages = FakePages({"https://wiki.example/vp": VP_PAGE})
     body = client.post(
         "/extract",
-        json={"urls": ["https://wiki.example/vp", "https://gone.example/"], "query": "Who is the current vice president?"},
+        json={
+            "urls": ["https://wiki.example/vp", "https://gone.example/"],
+            "query": "Who is the current vice president?",
+        },
     ).json()
     text = body["results"][0]["raw_content"]
     assert text.startswith("JD Vance is the 50th")
@@ -188,6 +192,7 @@ def test_request_log_line(client, fake_search, caplog):
 )
 def test_readiness(client, monkeypatch, searxng_status, fallback, status, code):
     monkeypatch.setattr(providers, "engine_health", providers.EngineHealth())
+
     def handler(request):
         assert request.url.path == "/healthz"
         if searxng_status is None:
@@ -213,3 +218,40 @@ def test_readiness_is_degraded_when_every_engine_is_blocked(client, monkeypatch)
 
     health.record(["brave"], {})
     assert client.get("/health/ready").json()["status"] == "ready"
+
+
+def test_search_validates_language_and_engines(client, fake_search, monkeypatch):
+    async def known(client):
+        return frozenset({"bing", "brave", "bing news"})
+
+    monkeypatch.setattr(providers, "known_engines", known)
+    client.app.state.pages = FakePages({})
+    assert client.post("/search", json={"query": "q", "language": "german"}).status_code == 422
+    assert client.post("/search", json={"query": "q", "engines": ["bing; drop"]}).status_code == 422
+    bad = client.post("/search", json={"query": "q", "engines": ["bing", "nosuch"]})
+    assert bad.status_code == 422 and "nosuch" in bad.json()["detail"]
+
+    ok = client.post("/search", json={"query": "q", "language": "de-DE", "engines": ["Brave", "bing"]})
+    assert ok.status_code == 200
+    # Engine names are lower-cased and sorted, so the same search hits the cache.
+    assert fake_search[-1][1]["engines"] == ["bing", "brave"]
+    assert fake_search[-1][1]["language"] == "de-DE"
+
+
+def test_daily_quota_per_key(client, fake_search, monkeypatch):
+    from openscour.server.ratelimit import DailyQuota
+
+    monkeypatch.setattr(main.settings, "api_keys", "key-a,key-b")
+    client.app.state.pages = FakePages({})
+    client.app.state.quota = DailyQuota(per_day=2)
+    a = {"Authorization": "Bearer key-a"}
+    first = client.post("/search", json={"query": "q1"}, headers=a)
+    assert first.headers["X-Quota-Limit"] == "2" and first.headers["X-Quota-Remaining"] == "1"
+    assert client.post("/search", json={"query": "q2"}, headers=a).headers["X-Quota-Remaining"] == "0"
+    over = client.post("/search", json={"query": "q3"}, headers=a)
+    assert over.status_code == 429
+    assert "Daily quota of 2 requests" in over.json()["detail"]
+    assert 0 < int(over.headers["Retry-After"]) <= 86400
+    # Another key has its own quota; a bad key is refused before any quota is used.
+    assert client.post("/search", json={"query": "q4"}, headers={"Authorization": "Bearer key-b"}).status_code == 200
+    assert client.post("/search", json={"query": "q5"}, headers={"Authorization": "Bearer wrong"}).status_code == 401

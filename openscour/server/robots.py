@@ -51,8 +51,9 @@ class RobotsChecker:
             task.add_done_callback(lambda _t: self._inflight.pop(origin, None))
         rules = await asyncio.shield(task)
         if rules is None:
+            # An empty robots.txt allows everything.
             rules = RobotFileParser()
-            rules.allow_all = True
+            rules.parse([])
         self._rules.set(origin, rules)
         return rules
 

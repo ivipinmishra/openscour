@@ -47,8 +47,10 @@ def _search_body(
     include_domains: list[str] | None,
     exclude_domains: list[str] | None,
     time_range: TimeRange | None,
+    language: str | None = None,
+    engines: list[str] | None = None,
 ) -> dict[str, Any]:
-    return {
+    body: dict[str, Any] = {
         "query": query,
         "search_depth": search_depth,
         "topic": topic,
@@ -59,6 +61,12 @@ def _search_body(
         "exclude_domains": exclude_domains or [],
         "time_range": time_range,
     }
+    # Only sent when used, so the client still works with servers older than 0.6.
+    if language:
+        body["language"] = language
+    if engines:
+        body["engines"] = engines
+    return body
 
 
 def _extract_body(urls: str | list[str], query: str | None, chunks_per_source: int) -> dict[str, Any]:
@@ -90,6 +98,10 @@ def _retry_wait(attempt: int, resp: httpx.Response | None = None) -> float | Non
             return None
         if (wait := _retry_after(resp)) is not None:
             return wait if wait <= MAX_RETRY_WAIT else None
+    return _backoff(attempt)
+
+
+def _backoff(attempt: int) -> float:
     # Exponential backoff with jitter, so many clients don't retry in step.
     return min(MAX_RETRY_WAIT, 0.5 * 2**attempt) * random.uniform(0.5, 1.0)
 
@@ -154,7 +166,7 @@ class OpenScour(_BaseClient):
                 resp = self._client.post(f"{self.base_url}{path}", json=body, headers=self._headers())
             except httpx.HTTPError as e:
                 if isinstance(e, _RETRYABLE_ERRORS) and attempt < self.max_retries:
-                    _sleep(_retry_wait(attempt))
+                    _sleep(_backoff(attempt))
                     attempt += 1
                     continue
                 raise APIConnectionError(f"Could not reach OpenScour at {self.base_url}: {e}") from e
@@ -177,10 +189,13 @@ class OpenScour(_BaseClient):
         include_domains: list[str] | None = None,
         exclude_domains: list[str] | None = None,
         time_range: TimeRange | None = None,
+        language: str | None = None,
+        engines: list[str] | None = None,
     ) -> SearchResponse:
         body = _search_body(
             query, search_depth, topic, max_results, include_answer,
             include_raw_content, include_domains, exclude_domains, time_range,
+            language, engines,
         )  # fmt: skip
         return SearchResponse.from_dict(self._post("/search", body))
 
@@ -221,7 +236,7 @@ class AsyncOpenScour(_BaseClient):
                 resp = await self._client.post(f"{self.base_url}{path}", json=body, headers=self._headers())
             except httpx.HTTPError as e:
                 if isinstance(e, _RETRYABLE_ERRORS) and attempt < self.max_retries:
-                    await _async_sleep(_retry_wait(attempt))
+                    await _async_sleep(_backoff(attempt))
                     attempt += 1
                     continue
                 raise APIConnectionError(f"Could not reach OpenScour at {self.base_url}: {e}") from e
@@ -244,10 +259,13 @@ class AsyncOpenScour(_BaseClient):
         include_domains: list[str] | None = None,
         exclude_domains: list[str] | None = None,
         time_range: TimeRange | None = None,
+        language: str | None = None,
+        engines: list[str] | None = None,
     ) -> SearchResponse:
         body = _search_body(
             query, search_depth, topic, max_results, include_answer,
             include_raw_content, include_domains, exclude_domains, time_range,
+            language, engines,
         )  # fmt: skip
         return SearchResponse.from_dict(await self._post("/search", body))
 

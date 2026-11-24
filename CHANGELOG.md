@@ -2,6 +2,22 @@
 
 All notable changes to OpenScour are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Search
+- New `/search` options: `language` (`de`, `de-DE`, `en-GB`) for results in a language and region, and `engines` to search only chosen SearXNG engines. Unknown engine names are rejected with `422` instead of SearXNG silently using its defaults. The Python client and the MCP `search` tool take both.
+- One arXiv paper takes one result slot: its abstract page, PDF and HTML version, in any version, count as the same document.
+- A paper's first passage starts at its abstract instead of its copyright notice and author list; the full text still has them.
+- "When is / are" questions no longer take years that label the topic ("1904 Summer Olympics", "the 2026 midterm") or past dates as answers: "When are the 2028 Summer Olympics?" finds "July 14 to 30, 2028".
+- Sentences no longer split at initials ("John F. Kennedy", "Daniel M. Ziegler").
+
+### Server
+- Docker Compose passes every setting from `.env` to the server. It used to pass only `API_KEYS`, `ANSWER_PROVIDER` and `SEARCH_PROXIES`, so settings such as `RATE_LIMIT_PER_MINUTE` or `CACHE_TTL_SECONDS` in `.env` were silently ignored.
+- `DAILY_QUOTA_PER_KEY` caps each API key's requests per UTC day. Responses carry `X-Quota-Limit` and `X-Quota-Remaining`; past the quota, requests get `429` with `Retry-After` until midnight UTC.
+
+### Development
+- CI lints with Ruff, checks formatting, and type-checks with mypy. Fixing the type errors replaced a private robots.txt parser attribute with its public equivalent.
+
 ## [0.5.0] - 2026-11-24
 
 PDF support, and more reliable answers to "how many", measurement and "who is" questions.

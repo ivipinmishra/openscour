@@ -1,9 +1,9 @@
 """OpenScour: self-hosted web search for LLMs and agents.
 
-    from openscour import OpenScour
+from openscour import OpenScour
 
-    client = OpenScour(api_key="YOUR_API_KEY")
-    results = client.search("Latest AWS Bedrock updates", max_results=10)
+client = OpenScour(api_key="YOUR_API_KEY")
+results = client.search("Latest AWS Bedrock updates", max_results=10)
 """
 
 from openscour.client import AsyncOpenScour, OpenScour

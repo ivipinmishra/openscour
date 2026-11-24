@@ -54,7 +54,7 @@ def test_duckduckgo_fallback_uses_a_search_proxy(monkeypatch):
         def __exit__(self, *exc):
             return False
 
-        def text(self, query, max_results, timelimit):
+        def text(self, query, max_results, timelimit, region="wt-wt"):
             return [{"title": "A", "href": "https://a.example/", "body": "a"}]
 
     monkeypatch.setattr(ddgs, "DDGS", FakeDDGS)
@@ -74,8 +74,69 @@ def test_results_without_a_host_are_dropped():
     # Brave's redirect links come through SearXNG as "http:///go/v1/...".
     results = [
         providers.RawResult("Broken", "http:///go/v1/AYsk3nEr8x4Aaw", "Read the whitepaper."),
-        providers.RawResult("Whitepaper", "https://bitcoin.org/bitcoin.pdf", "Bitcoin: A Peer-to-Peer Electronic Cash System"),
+        providers.RawResult(
+            "Whitepaper", "https://bitcoin.org/bitcoin.pdf", "Bitcoin: A Peer-to-Peer Electronic Cash System"
+        ),
         providers.RawResult("Relative", "/go/v1/abc", "x"),
         providers.RawResult("Not web", "ftp://files.example/a.pdf", "x"),
     ]
     assert [r.url for r in providers.filter_results(results, [], [])] == ["https://bitcoin.org/bitcoin.pdf"]
+
+
+def test_one_arxiv_paper_takes_one_result():
+    results = [
+        providers.RawResult("Attention Is All You Need", "https://arxiv.org/pdf/1706.03762", "PDF"),
+        providers.RawResult("Attention Is All You Need", "https://arxiv.org/html/1706.03762v3", "HTML"),
+        providers.RawResult("[1706.03762] Attention", "https://arxiv.org/abs/1706.03762v7", "abstract"),
+        providers.RawResult("Attention", "https://www.arxiv.org/pdf/1706.03762v1.pdf", "old PDF"),
+        providers.RawResult("Another paper", "https://arxiv.org/abs/2501.09166", "other"),
+        providers.RawResult("Old-style ID", "https://arxiv.org/abs/hep-th/9711200v2", "old id"),
+    ]
+    kept = [r.url for r in providers.filter_results(results, [], [])]
+    assert kept == [
+        "https://arxiv.org/pdf/1706.03762",
+        "https://arxiv.org/abs/2501.09166",
+        "https://arxiv.org/abs/hep-th/9711200v2",
+    ]
+
+
+async def test_language_and_engines_are_sent_to_searxng():
+    seen = []
+
+    def handler(request):
+        seen.append(dict(request.url.params))
+        return httpx.Response(200, json=SEARXNG_JSON)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    await providers.search(client, "Wetter Berlin", 5, language="de-DE")
+    await providers.search(client, "query", 5, topic="news", engines=["bing news", "brave.news"])
+    assert seen[0]["language"] == "de-DE" and seen[0]["categories"] == "general"
+    # With engines, no category: SearXNG would add that category's engines too.
+    assert seen[1]["engines"] == "bing news,brave.news" and "categories" not in seen[1]
+
+
+async def test_chosen_engines_get_no_duckduckgo_fallback(monkeypatch):
+    called = []
+    monkeypatch.setattr(providers, "_ddg_search_sync", lambda *a: called.append(a) or [])
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={"results": []})))
+    assert await providers.search(client, "query", 5, engines=["bing"]) == []
+    assert called == []
+    await providers.search(client, "query", 5)
+    assert len(called) == 1
+
+
+def test_duckduckgo_region_from_language():
+    assert providers._ddg_region(None) == "wt-wt"
+    assert providers._ddg_region("de") == "wt-wt"
+    assert providers._ddg_region("de-DE") == "de-de"
+    assert providers._ddg_region("en-GB") == "uk-en"
+
+
+async def test_known_engines_come_from_searxng_config(monkeypatch):
+    monkeypatch.setattr(providers, "_known_engines", None)
+    config = {"engines": [{"name": "bing", "enabled": True}, {"name": "google", "enabled": False}]}
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=config)))
+    assert await providers.known_engines(client) == {"bing", "google"}
+    broken = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+    monkeypatch.setattr(providers, "_known_engines", None)
+    assert await providers.known_engines(broken) is None

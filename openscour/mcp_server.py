@@ -33,7 +33,7 @@ MAX_EXTRACT_CHARS = 20_000
 
 server = MCPServer(name="openscour", instructions=INSTRUCTIONS)
 
-_READ_ONLY_WEB = ToolAnnotations(readOnlyHint=True, openWorldHint=True)
+_READ_ONLY_WEB = ToolAnnotations(read_only_hint=True, open_world_hint=True)
 
 
 # One client for the session, so tool calls reuse open connections. Tied to the
@@ -108,6 +108,8 @@ async def search(
     time_range: Literal["day", "week", "month", "year"] | None = None,
     include_domains: list[str] | None = None,
     exclude_domains: list[str] | None = None,
+    language: str | None = None,
+    engines: list[str] | None = None,
 ) -> str:
     """
     Args:
@@ -118,6 +120,8 @@ async def search(
         time_range: Only results from the last day, week, month or year.
         include_domains: Only return results from these domains.
         exclude_domains: Never return results from these domains.
+        language: Results in this language, optionally for a region, e.g. "de" or "de-DE".
+        engines: Search only these engines, e.g. ["bing"]; leave empty for the server's defaults.
     """
     async with _client() as client:
         response = await client.search(
@@ -128,6 +132,8 @@ async def search(
             time_range=time_range,
             include_domains=include_domains,
             exclude_domains=exclude_domains,
+            language=language,
+            engines=engines,
         )
     return format_search(response)
 

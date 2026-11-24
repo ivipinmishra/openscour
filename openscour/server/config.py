@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # Requests per minute for each API key (or each client IP when auth is off),
     # across /search and /extract. 0 turns rate limiting off.
     rate_limit_per_minute: int = 60
+    # Requests per UTC day for each API key (or client IP when auth is off),
+    # across /search and /extract. 0 means no daily quota.
+    daily_quota_per_key: int = 0
     # Take the client IP from the X-Forwarded-For header set by a load balancer.
     # Only enable behind a proxy that sets it: clients can forge it otherwise.
     trust_forwarded_for: bool = False

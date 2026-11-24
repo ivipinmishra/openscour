@@ -54,7 +54,8 @@ async def resolve_allowed(host: str, port: int, policy: AddressPolicy = public_o
         infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except socket.gaierror as e:
         raise httpcore.ConnectError(f"could not resolve {host}: {e}") from e
-    addresses = list(dict.fromkeys(info[4][0] for info in infos))
+    # For IPv4 and IPv6 the first item of the socket address is the address text.
+    addresses = list(dict.fromkeys(str(info[4][0]) for info in infos))
     for address in addresses:
         if not policy(ipaddress.ip_address(address.split("%")[0]), port):
             raise BlockedAddressError(f"blocked: {host} resolves to non-public address {address}")

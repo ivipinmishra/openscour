@@ -9,7 +9,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -29,7 +29,7 @@ from openscour.server.models import (
 )
 from openscour.server.netguard import guarded_transport
 from openscour.server.ranker import Doc, rank, relevant_passages
-from openscour.server.ratelimit import RateLimiter
+from openscour.server.ratelimit import DailyQuota, RateLimiter
 from openscour.server.robots import RobotsChecker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -68,6 +68,7 @@ async def lifespan(app: FastAPI):
     robots = RobotsChecker(app.state.page_http) if settings.respect_robots_txt else None
     app.state.pages = PageFetcher(app.state.page_http, page_cache, robots)
     app.state.limiter = RateLimiter(settings.rate_limit_per_minute) if settings.rate_limit_per_minute > 0 else None
+    app.state.quota = DailyQuota(settings.daily_quota_per_key) if settings.daily_quota_per_key > 0 else None
     await asyncio.to_thread(warm_up_extractors)
     yield
     await app.state.page_http.aclose()
@@ -133,16 +134,30 @@ def client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def rate_limit(request: Request, key: str | None = Depends(require_api_key)) -> None:
-    """Limits each API key, or each client IP when auth is off (after auth, so bad keys get 401)."""
-    limiter: RateLimiter | None = request.app.state.limiter
-    if limiter is None:
-        return
+def rate_limit(request: Request, response: Response, key: str | None = Depends(require_api_key)) -> None:
+    """Limits each API key, or each client IP when auth is off (after auth, so bad keys get 401).
+
+    The per-minute rate limit is checked first, so a burst that is turned away
+    doesn't use up the daily quota.
+    """
     client = f"key:{key}" if key else f"ip:{client_ip(request)}"
-    if (wait := limiter.acquire(client)) is not None:
+    limiter: RateLimiter | None = request.app.state.limiter
+    if limiter is not None and (wait := limiter.acquire(client)) is not None:
         raise HTTPException(
             status_code=429, detail="Rate limit exceeded", headers={"Retry-After": str(math.ceil(wait))}
         )
+    quota: DailyQuota | None = request.app.state.quota
+    if quota is None:
+        return
+    allowed, remaining, reset = quota.take(client)
+    headers = {"X-Quota-Limit": str(quota.per_day), "X-Quota-Remaining": str(remaining)}
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Daily quota of {quota.per_day} requests used; it resets at 00:00 UTC",
+            headers={**headers, "Retry-After": str(math.ceil(reset))},
+        )
+    response.headers.update(headers)
 
 
 def _engine_log_fields(stats: dict) -> dict[str, str]:
@@ -193,9 +208,13 @@ async def ready(request: Request):
 @app.post("/search", response_model=SearchResponse, dependencies=[Depends(rate_limit)])
 async def search(req: SearchRequest, request: Request) -> SearchResponse:
     start = time.perf_counter()
-    # Domain lists in a different order are the same search.
+    # Domain and engine lists in a different order are the same search.
     normalized = req.model_copy(
-        update={"include_domains": sorted(req.include_domains), "exclude_domains": sorted(req.exclude_domains)}
+        update={
+            "include_domains": sorted(req.include_domains),
+            "exclude_domains": sorted(req.exclude_domains),
+            "engines": sorted(set(req.engines)),
+        }
     )
     cache_key = hashlib.sha256(normalized.model_dump_json().encode()).hexdigest()
     if (hit := search_cache.get(cache_key)) is not None:
@@ -206,6 +225,9 @@ async def search(req: SearchRequest, request: Request) -> SearchResponse:
     n_candidates = req.max_results * 2 if extra is None else req.max_results + extra
 
     client: httpx.AsyncClient = request.app.state.http
+    if req.engines and (known := await providers.known_engines(client)) is not None:
+        if unknown := sorted(set(req.engines) - known):
+            raise HTTPException(status_code=422, detail=f"Unknown search engine: {', '.join(unknown)}")
     engine_stats: dict = {}
     raw = await providers.search(
         client,
@@ -216,6 +238,8 @@ async def search(req: SearchRequest, request: Request) -> SearchResponse:
         include_domains=req.include_domains,
         exclude_domains=req.exclude_domains,
         stats=engine_stats,
+        language=req.language,
+        engines=normalized.engines,
     )
     request.state.log_fields = _engine_log_fields(engine_stats)
     if not raw:

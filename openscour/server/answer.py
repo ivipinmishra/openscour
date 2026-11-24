@@ -35,9 +35,7 @@ async def generate_answer(query: str, results: list[Ranked]) -> str | None:
     if settings.answer_provider == "none" or not results:
         return None
 
-    sources = "\n\n".join(
-        f"[{i}] {r.doc.title}\n{r.doc.url}\n{r.content}" for i, r in enumerate(results, start=1)
-    )
+    sources = "\n\n".join(f"[{i}] {r.doc.title}\n{r.doc.url}\n{r.content}" for i, r in enumerate(results, start=1))
     messages = [{"role": "user", "content": f"Sources:\n\n{sources}\n\nQuery: {query}"}]
     try:
         response = await _client().messages.create(

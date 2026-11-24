@@ -20,3 +20,18 @@ def test_least_recent_clients_are_forgotten():
         assert limiter.acquire(client) is None
     assert limiter.acquire("c") is not None
     assert limiter.acquire("a") is None  # forgotten, so a fresh bucket
+
+
+def test_daily_quota_counts_per_client_and_resets_at_utc_midnight():
+    from datetime import UTC, datetime
+
+    from openscour.server.ratelimit import DailyQuota
+
+    quota = DailyQuota(per_day=2)
+    morning = datetime(2026, 11, 24, 6, 0, tzinfo=UTC)
+    assert quota.take("key:a", morning) == (True, 1, 18 * 3600)
+    assert quota.take("key:a", morning)[:2] == (True, 0)
+    assert quota.take("key:a", morning)[:2] == (False, 0)
+    assert quota.take("key:b", morning)[:2] == (True, 1)  # each key has its own quota
+    next_day = datetime(2026, 11, 25, 0, 0, 1, tzinfo=UTC)
+    assert quota.take("key:a", next_day)[:2] == (True, 1)

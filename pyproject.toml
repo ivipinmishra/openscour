@@ -65,8 +65,38 @@ exclude = ["**/.env", "**/.env.*"]
 default-groups = ["dev"]
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-asyncio>=0.24", "openscour[server,mcp]"]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "openscour[server,mcp]",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+# Code blocks in the README are written for reading, not formatted.
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+# Pyflakes and pycodestyle errors, import order, likely bugs, and modern syntax.
+select = ["E", "F", "W", "I", "B", "UP"]
+# FastAPI declares dependencies as Depends(...) defaults, which is how it's meant to be used.
+ignore = ["B008"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["openscour"]
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+# Libraries without type information.
+module = ["trafilatura", "trafilatura.*", "ddgs", "ddgs.*"]
+ignore_missing_imports = true

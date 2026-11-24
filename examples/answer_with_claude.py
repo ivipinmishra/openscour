@@ -1,8 +1,8 @@
 """Answer a question with current web information: search with OpenScour, answer with Claude.
 
-    uv add git+https://github.com/ivipinmishra/openscour anthropic
-    export ANTHROPIC_API_KEY=...
-    uv run python answer_with_claude.py "What changed in Amazon Bedrock this month?"
+uv add git+https://github.com/ivipinmishra/openscour anthropic
+export ANTHROPIC_API_KEY=...
+uv run python answer_with_claude.py "What changed in Amazon Bedrock this month?"
 """
 
 import sys
@@ -17,9 +17,7 @@ question = sys.argv[1] if len(sys.argv) > 1 else "What changed in Amazon Bedrock
 with OpenScour() as search_client:
     search = search_client.search(question, max_results=5, search_depth="advanced")
 
-sources = "\n\n".join(
-    f"[{i}] {r.title}\nURL: {r.url}\n{r.content}" for i, r in enumerate(search.results, start=1)
-)
+sources = "\n\n".join(f"[{i}] {r.title}\nURL: {r.url}\n{r.content}" for i, r in enumerate(search.results, start=1))
 
 # 2. Answer: Claude reads only those passages and cites them.
 claude = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY

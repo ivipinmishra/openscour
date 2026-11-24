@@ -1,6 +1,11 @@
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, StringConstraints
+
+# A SearXNG engine name, e.g. "bing", "brave", "bing news".
+EngineName = Annotated[
+    str, StringConstraints(strip_whitespace=True, to_lower=True, pattern=r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,39}$")
+]
 
 
 class SearchRequest(BaseModel):
@@ -13,6 +18,10 @@ class SearchRequest(BaseModel):
     include_domains: list[str] = []
     exclude_domains: list[str] = []
     time_range: Literal["day", "week", "month", "year"] | None = None
+    # Results in this language, optionally for a region: "de", "de-DE", "en-GB".
+    language: str | None = Field(default=None, pattern=r"^[a-z]{2,3}(-[A-Za-z]{2})?$")
+    # Search only these SearXNG engines instead of the configured ones.
+    engines: list[EngineName] = Field(default=[], max_length=10)
 
 
 class SearchResult(BaseModel):
