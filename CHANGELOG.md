@@ -2,7 +2,9 @@
 
 All notable changes to OpenScour are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.6.0] - 2026-11-24
+
+Search by language and engine, daily quotas per key, sharper answers to "when" questions and papers, and lint and type checks in CI.
 
 ### Search
 - New `/search` options: `language` (`de`, `de-DE`, `en-GB`) for results in a language and region, and `engines` to search only chosen SearXNG engines. Unknown engine names are rejected with `422` instead of SearXNG silently using its defaults. The Python client and the MCP `search` tool take both.
@@ -126,6 +128,7 @@ First release.
 ### MCP server
 - `openscour-mcp` gives AI agents read-only `search` and `extract` tools, with setup instructions for Claude Code, Kiro, Cursor, Claude Desktop and VS Code.
 
+[0.6.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.6.0
 [0.5.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.5.0
 [0.4.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.4.0
 [0.3.1]: https://github.com/ivipinmishra/openscour/releases/tag/v0.3.1
