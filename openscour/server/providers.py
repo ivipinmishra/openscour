@@ -72,7 +72,10 @@ def filter_results(
     seen: set[str] = set()
     out = []
     for r in results:
-        if not r.url.startswith(("http://", "https://")):
+        # Engines sometimes return redirect links SearXNG can't resolve, such as
+        # Brave's "/go/v1/..." becoming "http:///go/v1/...": no host, nothing to read.
+        parts = urlsplit(r.url)
+        if parts.scheme not in ("http", "https") or not parts.hostname:
             continue
         key = normalize_url(r.url)
         if key in seen:

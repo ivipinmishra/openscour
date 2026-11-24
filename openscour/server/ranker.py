@@ -39,6 +39,8 @@ _MEASUREMENT = re.compile(
 )
 # "latest Python release", "what is the current version of Node.js"
 _VERSION = re.compile(r"\b[vV]?\d+\.\d+(?:\.\d+)?\b")
+# "How many/much/old...": any number, digits or words.
+_COUNT = re.compile(rf"\d|\b{_NUMBER_WORD}\b", re.I)
 
 # What kind of text answers a question, keyed by how the question starts.
 INTENTS: list[tuple[re.Pattern, re.Pattern]] = [
@@ -61,7 +63,7 @@ INTENTS: list[tuple[re.Pattern, re.Pattern]] = [
     ),
     (
         re.compile(r"^\s*(how (many|much|old)\b|what is the (population|price|cost)\b)", re.I),
-        re.compile(rf"\d|\b{_NUMBER_WORD}\b", re.I),
+        _COUNT,
     ),
     (
         re.compile(r"\b(latest|current|newest)\b.*\b(version|release)s?\b", re.I),
@@ -128,6 +130,68 @@ def dimension_pattern(query: str) -> re.Pattern | None:
     return None
 
 
+# "How many X ..." -> the words naming X. The phrase ends at the verb or preposition:
+# "how many attention heads does", "how many bones are in".
+_HOW_MANY = re.compile(
+    r"\bhow many\s+(.+?)(?=\s+(?:does|do|did|is|are|was|were|has|have|had|can|could|will|would|"
+    r"in|on|at|of|per|for|there|live|exist)\b|[?.!]|$)",
+    re.I,
+)
+# A whole number or a number word: candidate counts.
+# "3.2.2" is one token, so a section number can't leave a stray "2" behind.
+_COUNT_NUMBER = re.compile(rf"\b\d[\d,]*(?:\.\d+)*\b|\b{_NUMBER_WORD}\b", re.I)
+# Numbers that point somewhere rather than count: "Table 3", "Section 3.2.2", "[12]".
+_REFERENCE_BEFORE = re.compile(
+    r"(?:\b(?:table|tab|figure|fig|section|sec|chapter|ch|eq|equation|page|pp?|appendix|row|line|step|"
+    r"version|vol|no|item|rule|article|art)\.?\s*\(?|\[|§\s*)$",
+    re.I,
+)
+_UNIT_AFTER = re.compile(rf"\s?{_UNIT}(?![\w])", re.I)
+_COUNT_WINDOW = 6  # words either side of the number
+
+
+def _stem(word: str) -> str:
+    """Crude singular form, enough to match "heads"/"head" and "countries"/"country"."""
+    w = word.casefold()
+    if len(w) > 4 and w.endswith("ies"):
+        return w[:-3] + "y"
+    if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+        return w[:-1]
+    return w
+
+
+def counted_words(query: str) -> frozenset[str] | None:
+    """The stems of what a "how many" question counts, or None for other questions."""
+    m = _HOW_MANY.search(query)
+    if not m:
+        return None
+    stems = frozenset(_stem(w) for w in _words(m.group(1)) if w not in STOPWORDS)
+    return stems or None
+
+
+def count_strength(sentence: str, counted: frozenset[str]) -> int:
+    """How well a sentence answers "how many <counted>": 2 = a count beside the
+    counted thing ("two moons", "h = 8 ... heads"), 1 = some other count, 0 = none.
+
+    Reference numbers ("Table 3", "Section 3.2.2"), decimals ("0.9 BLEU") and
+    measurements ("12 kilometers") are not counts.
+    """
+    words = [(w.start(), _stem(w.group(0))) for w in _WORD.finditer(sentence)]
+    best = 0
+    for m in _COUNT_NUMBER.finditer(sentence):
+        number = m.group(0)
+        if "." in number or _REFERENCE_BEFORE.search(sentence[max(0, m.start() - 12) : m.start()]):
+            continue
+        if _UNIT_AFTER.match(sentence, m.end()):
+            continue
+        at = next((i for i, (start, _) in enumerate(words) if start >= m.start()), len(words))
+        nearby = {stem for _, stem in words[max(0, at - _COUNT_WINDOW) : at + _COUNT_WINDOW + 1]}
+        best = max(best, 2 if nearby & counted else 1)
+        if best == 2:
+            break
+    return best
+
+
 # Navigation, references and other page chrome that matches keywords but answers nothing.
 BOILERPLATE = re.compile(
     r"\bretrieved\b|external links|\[edit\]|\bcookies?\b|\bsubscribe\b|\bnewsletter\b|"
@@ -184,12 +248,16 @@ def answer_pattern(query: str) -> re.Pattern | None:
 _BARE_YEAR = re.compile(r"(1[0-9]|20)\d{2}")
 
 
-def answer_strength(answer: re.Pattern, sentence: str, query: set[str]) -> int:
+def answer_strength(
+    answer: re.Pattern, sentence: str, query: set[str], counted: frozenset[str] | None = None
+) -> int:
     """0 = no answer, 1 = vague answer (a bare year), 2 = specific answer.
 
     Matches made only of the question's own words don't count: "Vice President"
     looks like a name and "2026" like a date, but they don't answer the question.
     """
+    if counted is not None and answer is _COUNT:
+        return count_strength(sentence, counted)
     best = 0
     for m in answer.finditer(sentence):
         words = set(_words(m.group(0)))
@@ -204,7 +272,12 @@ def _answer_sentences(chunk: str) -> list[str]:
 
 
 def answer_first(
-    chunk: str, query: set[str], answer: re.Pattern | None, present: bool, dimension: re.Pattern | None = None
+    chunk: str,
+    query: set[str],
+    answer: re.Pattern | None,
+    present: bool,
+    dimension: re.Pattern | None = None,
+    counted: frozenset[str] | None = None,
 ) -> str:
     """Trim leading sentences so the passage starts at its best answering sentence."""
     if answer is None:
@@ -214,7 +287,7 @@ def answer_first(
     def quality(s: str) -> int:
         if s.rstrip().endswith("?") or not query & set(tokenize(s)):
             return 0
-        strength = answer_strength(answer, s, query)
+        strength = answer_strength(answer, s, query, counted)
         if not strength:
             return 0
         return strength + (1 if present and CURRENT.search(s) else 0) + (1 if dimension and dimension.search(s) else 0)
@@ -233,6 +306,7 @@ def chunk_multiplier(
     answer: re.Pattern | None,
     present: bool = False,
     dimension: re.Pattern | None = None,
+    counted: frozenset[str] | None = None,
 ) -> float:
     m = 1.0
     # Pages tend to state the key fact near the top.
@@ -246,7 +320,7 @@ def chunk_multiplier(
         m *= 0.75 ** min(hits, 6)
 
     if answer is not None:
-        strengths = [(answer_strength(answer, s, query), s) for s in _answer_sentences(chunk)]
+        strengths = [(answer_strength(answer, s, query, counted), s) for s in _answer_sentences(chunk)]
         answering = [(k, s) for k, s in strengths if k]
         near = [(k, s) for k, s in answering if query & set(tokenize(s))]
         if near:
@@ -408,6 +482,7 @@ def rank(query: str, docs: list[Doc], chunks_per_doc: int) -> list[Ranked]:
         return []
     answer = answer_pattern(query)
     dimension = dimension_pattern(query) if answer is _MEASUREMENT else None
+    counted = counted_words(query) if answer is _COUNT else None
     version_question = answer is _VERSION
     present = bool(PRESENT_TENSE.search(query)) or version_question
     # Factual questions have their own answer-shaped scoring; topic searches
@@ -439,7 +514,7 @@ def rank(query: str, docs: list[Doc], chunks_per_doc: int) -> list[Ranked]:
         s = bm25.score(q, i)
         if s:
             chunk = docs[di].chunks[ci]
-            s *= chunk_multiplier(chunk, ci, qset, titles[di], answer, present, dimension)
+            s *= chunk_multiplier(chunk, ci, qset, titles[di], answer, present, dimension, counted)
             if topic_search:
                 s *= topic_multiplier(set(corpus[i]), topic, entities)
                 if is_heading_list(chunk):
@@ -467,7 +542,9 @@ def rank(query: str, docs: list[Doc], chunks_per_doc: int) -> list[Ranked]:
         Ranked(
             doc=docs[di],
             score=round(s / top_score, 4),
-            content=" … ".join(answer_first(docs[di].chunks[ci], qset, answer, present, dimension) for ci in cis),
+            content=" … ".join(
+                answer_first(docs[di].chunks[ci], qset, answer, present, dimension, counted) for ci in cis
+            ),
         )
         for s, di, cis in raw
     ]

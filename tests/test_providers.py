@@ -68,3 +68,14 @@ def test_duckduckgo_fallback_uses_a_search_proxy(monkeypatch):
     monkeypatch.setattr(providers.settings, "search_proxies", "")
     providers._ddg_search_sync("query", 5, "general", None)
     assert used[1] is None
+
+
+def test_results_without_a_host_are_dropped():
+    # Brave's redirect links come through SearXNG as "http:///go/v1/...".
+    results = [
+        providers.RawResult("Broken", "http:///go/v1/AYsk3nEr8x4Aaw", "Read the whitepaper."),
+        providers.RawResult("Whitepaper", "https://bitcoin.org/bitcoin.pdf", "Bitcoin: A Peer-to-Peer Electronic Cash System"),
+        providers.RawResult("Relative", "/go/v1/abc", "x"),
+        providers.RawResult("Not web", "ftp://files.example/a.pdf", "x"),
+    ]
+    assert [r.url for r in providers.filter_results(results, [], [])] == ["https://bitcoin.org/bitcoin.pdf"]

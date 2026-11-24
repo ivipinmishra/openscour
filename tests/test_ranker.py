@@ -10,6 +10,7 @@ from openscour.server.ranker import (
     query_terms,
     rank,
     recency_multiplier,
+    relevant_passages,
 )
 
 
@@ -303,3 +304,40 @@ def test_heading_running_into_a_sentence_is_not_a_name():
         Doc(url="https://news.com", title="New prime minister", text=news, rank=1),
     ]
     assert rank("Who is the prime minister of the UK?", docs, chunks_per_doc=1)[0].doc.url == "https://news.com"
+
+
+def test_how_many_prefers_a_count_beside_the_counted_thing():
+    # From "Attention Is All You Need": "Table 3" and "Section 3.2.2" point
+    # somewhere and "0.9 BLEU" is a score; "h = 8 ... heads" is the count.
+    paper = (
+        "In Table 3 rows (A), we vary the number of attention heads and the attention key and value "
+        "dimensions, keeping the amount of computation constant, as described in Section 3.2.2. While "
+        "single-head attention is 0.9 BLEU worse than the best setting, quality also drops off with too "
+        "many heads.\n"
+        "Multi-head attention allows the model to jointly attend to information from different "
+        "representation subspaces at different positions. In this work we employ h = 8 parallel "
+        "attention layers, or heads. For each of these we use dk = dv = dmodel/h = 64."
+    )
+    passage = relevant_passages("How many attention heads does the Transformer use?", paper, max_passages=1)
+    assert passage.startswith("In this work we employ h = 8 parallel attention layers, or heads.")
+
+
+def test_how_many_ignores_measurements():
+    sizes = (
+        "Deimos, the smaller of the moons of Mars, is about 12 kilometers across. The moons of Mars orbit "
+        "close: Deimos circles Mars at 23,460 kilometers, and Phobos, the larger of the Mars moons, at 6,000 kilometers."
+    )
+    count = "Mars has two small moons, Phobos and Deimos, both probably captured asteroids."
+    docs = [
+        Doc(url="https://sizes.com", title="Moons of Mars", text=sizes, rank=0),
+        Doc(url="https://count.com", title="Moons of Mars", text=count, rank=1),
+    ]
+    assert rank("How many moons does Mars have?", docs, chunks_per_doc=1)[0].doc.url == "https://count.com"
+
+
+def test_counted_words():
+    from openscour.server.ranker import counted_words
+
+    assert counted_words("How many attention heads does the Transformer use?") == {"attention", "head"}
+    assert counted_words("How many countries are in the European Union?") == {"country"}
+    assert counted_words("How much does a Tesla cost?") is None

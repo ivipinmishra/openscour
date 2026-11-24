@@ -10,6 +10,8 @@ All notable changes to OpenScour are listed here. Versions follow [Semantic Vers
 - Uses [pypdf](https://pypi.org/project/pypdf/) (BSD), a new dependency of the `server` extra.
 
 ### Search quality
+- "How many" questions prefer a number beside the thing being counted ("two moons", "h = 8 … heads"), and no longer count reference numbers ("Table 3", "Section 3.2.2"), decimals ("0.9 BLEU") or measurements ("12 kilometers"). "How many attention heads does the Transformer use?" now finds "h = 8 parallel attention layers, or heads" in the paper's PDF.
+- Results whose address has no host are dropped. Brave's redirect links reach SearXNG as `http:///go/v1/…`, which can't be read and pushed real results out.
 - Measurement questions ("how tall / long / far / deep / heavy…") need a number with a unit, and prefer one beside the dimension asked about: "an elevation of 8,849 m" beats "70 m below the summit" and "completed in 1889" no longer counts. Answer in the first passage went from 6 to 9 of 10 test questions with `max_results: 1`, and from 8 to 10 with 5.
 - "Who is" questions no longer mistake place and institution names ("United States") or headings running into a sentence ("Responsibilities The") for a person, and only treat "current" as naming the holder when the sentence says so ("X is the current…", "the current … is X").
 - `scripts/eval_answers.py` also runs every question with `max_results: 1`, and adds measurement and "who is" questions.
