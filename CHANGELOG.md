@@ -2,7 +2,9 @@
 
 All notable changes to OpenScour are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.5.0] - 2026-11-24
+
+PDF support, and more reliable answers to "how many", measurement and "who is" questions.
 
 ### PDFs
 - Search results and `/extract` URLs that are PDFs are now read, instead of falling back to the search snippet. Lines are rejoined into sentences (including hyphenated words), reference lists are cut, and queries pick the matching passages as for web pages: "How many attention heads does the Transformer use?" finds "h = 8 parallel attention layers" in the 15-page paper.
@@ -108,6 +110,7 @@ First release.
 ### MCP server
 - `openscour-mcp` gives AI agents read-only `search` and `extract` tools, with setup instructions for Claude Code, Kiro, Cursor, Claude Desktop and VS Code.
 
+[0.5.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.5.0
 [0.4.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.4.0
 [0.3.1]: https://github.com/ivipinmishra/openscour/releases/tag/v0.3.1
 [0.3.0]: https://github.com/ivipinmishra/openscour/releases/tag/v0.3.0
