@@ -4,6 +4,11 @@ All notable changes to OpenScour are listed here. Versions follow [Semantic Vers
 
 ## [Unreleased]
 
+### PDFs
+- Search results and `/extract` URLs that are PDFs are now read, instead of falling back to the search snippet. Lines are rejoined into sentences (including hyphenated words), reference lists are cut, and queries pick the matching passages as for web pages: "How many attention heads does the Transformer use?" finds "h = 8 parallel attention layers" in the 15-page paper.
+- PDFs are recognised by content type or by their first bytes, since servers often send them as `application/octet-stream`. `MAX_PDF_BYTES` (15 MB) and `PDF_MAX_PAGES` (50) bound the work; larger, encrypted, scanned or broken PDFs, and extraction that takes too long, fall back to the snippet.
+- Uses [pypdf](https://pypi.org/project/pypdf/) (BSD), a new dependency of the `server` extra.
+
 ### Search quality
 - Measurement questions ("how tall / long / far / deep / heavy…") need a number with a unit, and prefer one beside the dimension asked about: "an elevation of 8,849 m" beats "70 m below the summit" and "completed in 1889" no longer counts. Answer in the first passage went from 6 to 9 of 10 test questions with `max_results: 1`, and from 8 to 10 with 5.
 - "Who is" questions no longer mistake place and institution names ("United States") or headings running into a sentence ("Responsibilities The") for a person, and only treat "current" as naming the holder when the sentence says so ("X is the current…", "the current … is X").

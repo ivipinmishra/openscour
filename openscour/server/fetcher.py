@@ -1,4 +1,5 @@
 import asyncio
+import io
 import logging
 import multiprocessing
 import re
@@ -7,6 +8,8 @@ from concurrent.futures.process import BrokenProcessPool
 
 import httpx
 import trafilatura
+from pypdf import PdfReader
+from pypdf.errors import PyPdfError
 
 from openscour.server.cache import TTLCache
 from openscour.server.config import settings
@@ -15,6 +18,9 @@ from openscour.server.robots import RobotsChecker
 log = logging.getLogger(__name__)
 
 _TEXT_TYPES = ("text/html", "application/xhtml+xml", "text/plain")
+PDF_TYPE = "application/pdf"
+# Servers often send PDFs as generic binary; the file's first bytes tell.
+_BINARY_TYPES = ("application/octet-stream", "binary/octet-stream", "application/x-pdf")
 
 # Extraction runs in worker processes: trafilatura/lxml is not safe in parallel
 # threads (concurrent element copies corrupt libxml2's shared dictionary and abort
@@ -51,20 +57,35 @@ class FetchError(Exception):
     pass
 
 
-async def _download(client: httpx.AsyncClient, url: str, timeout: float) -> tuple[str, str]:
+def _is_pdf(body: bytes | bytearray) -> bool:
+    # The header may follow a little junk; readers look in the first kilobyte.
+    return b"%PDF-" in body[:1024]
+
+
+async def _download(client: httpx.AsyncClient, url: str, timeout: float) -> tuple[str | bytes, str]:
+    """The page as text, or as bytes with content type application/pdf for PDFs."""
     async with client.stream("GET", url, timeout=timeout, follow_redirects=True) as resp:
         if resp.status_code >= 400:
             raise FetchError(f"HTTP {resp.status_code}")
         ctype = resp.headers.get("content-type", "").split(";")[0].strip().lower()
-        if ctype and not ctype.startswith(_TEXT_TYPES):
+        maybe_pdf = ctype in (PDF_TYPE, *_BINARY_TYPES) or not ctype
+        if ctype and not (ctype.startswith(_TEXT_TYPES) or maybe_pdf):
             raise FetchError(f"unsupported content type {ctype}")
+        limit = settings.max_pdf_bytes if maybe_pdf else settings.max_page_bytes
         body = bytearray()
         async for chunk in resp.aiter_bytes():
             body.extend(chunk)
-            if len(body) > settings.max_page_bytes:
+            if len(body) > limit:
+                if maybe_pdf and _is_pdf(body):
+                    raise FetchError("PDF larger than MAX_PDF_BYTES")
                 break
         encoding = resp.encoding or "utf-8"
-    return body.decode(encoding, errors="replace"), ctype
+    if maybe_pdf and _is_pdf(body):
+        return bytes(body), PDF_TYPE
+    # Not a PDF after all: only text types (or no type at all) are left to read.
+    if ctype and not ctype.startswith(_TEXT_TYPES):
+        raise FetchError(f"unsupported content type {ctype}")
+    return bytes(body[: settings.max_page_bytes]).decode(encoding, errors="replace"), ctype
 
 
 # Back-matter headings; everything from the first one onward is citations and links.
@@ -86,7 +107,54 @@ def strip_back_matter(text: str) -> str:
     return text
 
 
-def _extract(html: str, ctype: str) -> str:
+# A hyphen splitting a word across lines: "informa-\ntion".
+_LINE_HYPHEN = re.compile(r"([a-z])-\n([a-z])")
+_SENTENCE_LINE_END = re.compile(r"[.!?:;\"”)]$")
+
+
+def _clean_pdf_text(text: str) -> str:
+    """Rejoin the lines of PDF text into paragraphs.
+
+    PDFs store lines, not paragraphs: sentences break wherever the page did and
+    long words are hyphenated. A line that ends a sentence keeps its break;
+    other lines join the next, so the ranker sees whole sentences.
+    """
+    text = _LINE_HYPHEN.sub(r"\1\2", text)
+    paragraphs: list[str] = []
+    current: list[str] = []
+    for line in (ln.strip() for ln in text.split("\n")):
+        if not line:
+            if current:
+                paragraphs.append(" ".join(current))
+                current = []
+            continue
+        current.append(line)
+        if _SENTENCE_LINE_END.search(line):
+            paragraphs.append(" ".join(current))
+            current = []
+    if current:
+        paragraphs.append(" ".join(current))
+    return "\n".join(re.sub(r"\s{2,}", " ", p) for p in paragraphs)
+
+
+def _extract_pdf(data: bytes) -> str:
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        if reader.is_encrypted and not reader.decrypt(""):
+            raise FetchError("encrypted PDF")
+        pages = [reader.pages[i].extract_text() or "" for i in range(min(len(reader.pages), settings.pdf_max_pages))]
+    except FetchError:
+        raise
+    except (PyPdfError, ValueError, KeyError, TypeError, OSError) as e:
+        # Malformed files raise all sorts; the page just falls back to its snippet.
+        raise FetchError(f"unreadable PDF ({type(e).__name__})") from e
+    # Cut references before rejoining lines, while headings are still on their own line.
+    return _clean_pdf_text(strip_back_matter("\n".join(pages)))
+
+
+def _extract(html: str | bytes, ctype: str) -> str:
+    if ctype == PDF_TYPE:
+        return _extract_pdf(html)
     if ctype == "text/plain":
         return html.strip()
     # Markdown output keeps sentences and infobox rows that plain-text output
@@ -110,7 +178,13 @@ async def fetch_page(client: httpx.AsyncClient, url: str, timeout: float) -> str
         reason = str(e) if str(e).startswith("blocked:") else type(e).__name__
         raise FetchError(reason) from e
     try:
-        text = await asyncio.get_running_loop().run_in_executor(_extract_pool(), _extract, html, ctype)
+        # Extraction gets the download's time again: a slow PDF falls back to its
+        # snippet instead of holding the request (its worker finishes on its own).
+        text = await asyncio.wait_for(
+            asyncio.get_running_loop().run_in_executor(_extract_pool(), _extract, html, ctype), timeout
+        )
+    except asyncio.TimeoutError as e:
+        raise FetchError("extraction timed out") from e
     except BrokenProcessPool as e:
         # A worker died (e.g. a pathological page); start fresh workers next time.
         shutdown_extractors()

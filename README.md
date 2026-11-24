@@ -45,7 +45,7 @@ print(response.results[0].content)
 - **Answer-first passages.** Results are ranked passages from real pages, not just links. For questions like *when*, *who* and *how many*, the passage that contains the answer comes first and starts at the answering sentence.
 - **Topic-aware and fresh.** Searches such as *"Latest AWS Bedrock updates"* require the named topic in each passage and favor recent content.
 - **No paid search provider.** Results come from a self-hosted [SearXNG](https://github.com/searxng/searxng) meta-search engine, with a DuckDuckGo fallback.
-- **Clean text extraction.** Navigation, cookie banners, reference lists and footnote markers are removed. Given a query, extraction returns only the passages that matter, often 95% shorter than the page.
+- **Clean text extraction.** Web pages and PDFs. Navigation, cookie banners, reference lists and footnote markers are removed, and PDF lines are rejoined into sentences. Given a query, extraction returns only the passages that matter, often 95% shorter than the page.
 - **Three ways in.** A plain HTTP API for any language, a typed Python client, and an MCP server for AI agents such as Claude Code, Kiro and Cursor.
 - **Optional AI answers.** Claude can write a short cited answer from the top passages, through Amazon Bedrock or the Claude API.
 - **Many languages.** Search and ranking work with accented, Cyrillic, Chinese, Japanese and Korean text, not only English.
@@ -508,6 +508,8 @@ Set environment variables on the server, or copy [`.env.example`](https://github
 | `EXTRACT_MAX_TASKS_PER_CHILD` | `500` | Pages a worker extracts before it is replaced, to keep memory flat |
 | `FETCH_CONCURRENCY` | `10` | Page downloads at once, across all requests |
 | `MAX_INFLIGHT_FETCHES` | `200` | Fetches queued or running at once; beyond this, searches use snippets |
+| `MAX_PDF_BYTES` | `15000000` | Largest PDF read, in bytes (PDFs are read whole); larger ones use the search snippet |
+| `PDF_MAX_PAGES` | `50` | Pages extracted from each PDF |
 | `CACHE_TTL_SECONDS` | `3600` | How long searches and pages stay cached |
 | `USER_AGENT` | `OpenScour/<version> (+repository URL)` | How OpenScour identifies itself to websites |
 | `RESPECT_ROBOTS_TXT` | `true` | Skip pages a site's robots.txt disallows |
@@ -575,7 +577,8 @@ Before you expose OpenScour beyond your own machine:
 
 - **Search engines rate-limit.** SearXNG gets results by querying public search engines, which answer heavy or automated traffic with CAPTCHAs or blocks; SearXNG then pauses a blocked engine for up to a day. In testing from a home connection, Google, DuckDuckGo and Qwant blocked almost every query while Brave, Bing and Yahoo answered all of them, so [`searxng/settings.yml`](https://github.com/ivipinmishra/openscour/blob/main/searxng/settings.yml) enables those three. Which engines work depends on your network, and cloud IP ranges such as AWS are blocked more often. Watch the `engines` and `engines_failed` log fields and `/health/ready`, and adjust the engine list or add [search engine proxies](#search-engine-proxies) when results get thin. The DuckDuckGo fallback is affected by the same blocks. For sustained production traffic, plan for a licensed search API.
 - **Ranking is rule-based.** It handles common question types well but can miss when the answer is phrased unusually, for example lists of past officeholders for *who is* questions. Turning on AI answers helps with those cases.
-- **JavaScript-heavy pages and PDFs** are not extracted; the search engine's snippet is used instead.
+- **JavaScript-heavy pages** are not extracted; the search engine's snippet is used instead.
+- **Scanned PDFs** (images of text, with no text layer) have nothing to extract and use the snippet too; there is no OCR. Encrypted PDFs are skipped the same way.
 - **No outbound proxy for page fetches.** `SEARCH_PROXIES` covers search engine queries only. To keep the SSRF check effective, page fetches connect directly and ignore `HTTP_PROXY`/`HTTPS_PROXY`, so networks that only allow internet access through a proxy aren't supported yet.
 
 ## Responsible use

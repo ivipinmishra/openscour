@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     # pages that aren't ready; those pages keep loading in the background for the cache.
     basic_fetch_deadline: float = 2.0
     max_page_bytes: int = 3_000_000
+    # PDFs are read whole (a cut-off PDF can't be parsed), so they get their own
+    # limit; larger ones fall back to the search snippet. Only the first
+    # pdf_max_pages pages are extracted.
+    max_pdf_bytes: int = 15_000_000
+    pdf_max_pages: int = 50
     # Longer caching means fewer queries to search engines, which rate-limit automated traffic.
     cache_ttl_seconds: int = 3600
     # Pages being fetched at once across all requests; more wait their turn.
